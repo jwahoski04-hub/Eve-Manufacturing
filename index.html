@@ -5896,6 +5896,28 @@ let state = {
       return new Set(raw ? JSON.parse(raw) : []);
     } catch (e) { return new Set(); }
   })(),
+  // Per-station structure + rig configuration. Keyed by stationID. Populated
+  // by the rig-picker UI (Increment 5) and/or ESI auto-fetch (Phase 3).
+  //
+  //   stationConfigs[stationID] = {
+  //     structureType: 'azbel',         // key from STRUCTURE_TYPES
+  //     rigSlots: ['rig_blsme_2'],      // array of rig IDs from RIG_CATALOG
+  //     systemSecurity: -0.1,           // actual security status of the system
+  //   }
+  //
+  // The catalog (STRUCTURE_TYPES + RIG_CATALOG) provides the bonus math;
+  // this map tells us what's actually installed where. Separating the two
+  // means catalog updates don't touch user data.
+  //
+  // Stations without an entry here fall back to the legacy flat mfgMat
+  // value in LOCATIONS (for backward compatibility — Increment 4 will use
+  // stationConfigs when present, legacy multiplier otherwise).
+  stationConfigs: (() => {
+    try {
+      const raw = localStorage.getItem('eveIndustry.stationConfigs');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  })(),
   // True while a debounced runs-save is pending (see persistRunsIfUser).
   // Drives the "SAVING…" vs "SAVED ✓" indicator.
   runsSaving: false,
@@ -5930,6 +5952,14 @@ function saveProjectStations() {
 function saveManualStations() {
   try {
     localStorage.setItem('eveIndustry.manualStations', JSON.stringify(Array.from(state.manualStations)));
+  } catch (e) {}
+}
+// Persist stationConfigs to localStorage. stationConfigs is a plain object
+// (keyed by stationID), so we stringify directly — no Array.from() needed
+// like with the Set-based savers above.
+function saveStationConfigs() {
+  try {
+    localStorage.setItem('eveIndustry.stationConfigs', JSON.stringify(state.stationConfigs));
   } catch (e) {}
 }
 function saveBuyInsteadOfBuild() {
