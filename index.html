@@ -8524,10 +8524,26 @@ function locationForActivity(project, activity) {
 // Get the ME of the best BPC owned at a given location (largest ME, tiebreak on runs).
 // Returns null if no BPC at that location.
 function bpcMEAt(bpTypeID, locationID) {
-  const bpcs = bpcsAt(bpTypeID, locationID);
-  if (bpcs.length === 0) return null;
-  // Prefer highest ME, then most runs
-  const best = bpcs.reduce((a, b) => {
+  // First, check for BPCs at the exact location (local).
+  const localBpcs = bpcsAt(bpTypeID, locationID);
+  if (localBpcs.length > 0) {
+    // Prefer highest ME, then most runs — matches previous behavior
+    const best = localBpcs.reduce((a, b) => {
+      if (b.me > a.me) return b;
+      if (b.me === a.me && b.runsRemaining > a.runsRemaining) return b;
+      return a;
+    });
+    return best.me;
+  }
+  // No local BPC, but in EVE you can use any BPC you own — it doesn't have
+  // to be at the manufacturing station. Fall back to the best BPC anywhere
+  // (including other stations, Khanid Prime, etc.). This mirrors how the
+  // UI's bpcStatus helper picks 'bestElse' for display — keeping math and
+  // UI in sync so the tool doesn't silently drop ME when the BPC is stored
+  // at a different station than where the job runs.
+  const allBpcs = getBPCs(bpTypeID);
+  if (allBpcs.length === 0) return null;
+  const best = allBpcs.reduce((a, b) => {
     if (b.me > a.me) return b;
     if (b.me === a.me && b.runsRemaining > a.runsRemaining) return b;
     return a;
