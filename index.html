@@ -266,6 +266,20 @@
     transition: all 0.15s;
   }
   .char-chip-remove:hover { opacity: 1; color: #e89b8d; }
+  /* Overflow badge — when the user has more linked characters than the
+     top-bar slot displays, show a small '+N' inside the visible chip to
+     indicate that more are available in the Characters tab. */
+  .char-chip-others {
+    margin-left: 4px;
+    padding: 1px 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    color: #8a7048;
+    background: rgba(201, 168, 104, 0.1);
+    border: 1px solid rgba(201, 168, 104, 0.25);
+    border-radius: 2px;
+  }
   .char-add-btn {
     padding: 4px 10px;
     background: none;
@@ -2439,6 +2453,51 @@
     line-height: 1.5;
   }
   .chars-tab-intro strong { color: #6cc04a; }
+  /* Add-Character card inside Characters tab — replaces the old top-bar
+     '+ Add' button. Dashed border signals 'action slot'; matches the visual
+     affordance of the old top-bar button. */
+  .chars-tab-add-card {
+    margin: 12px 0;
+    padding: 14px 16px;
+    background: rgba(201, 168, 104, 0.04);
+    border: 1px dashed rgba(201, 168, 104, 0.3);
+  }
+  .chars-tab-add-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: #c9a868;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .chars-tab-add-desc {
+    font-size: 12px;
+    color: #8a9ba8;
+    line-height: 1.5;
+  }
+  /* Remove-character button on each row — subtle at rest, obvious on hover. */
+  .chars-tab-remove {
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #5b7280;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.4;
+    transition: all 0.15s;
+  }
+  .chars-tab-row:hover .chars-tab-remove { opacity: 0.9; }
+  .chars-tab-remove:hover {
+    opacity: 1 !important;
+    color: #c86060;
+    border-color: rgba(200, 96, 96, 0.35);
+    background: rgba(200, 96, 96, 0.15);
+  }
   .chars-tab-list {
     padding: 6px 10px;
   }
@@ -7729,31 +7788,44 @@ function fmtSyncAge(syncedAt) {
   return `Synced ${Math.floor(hrs/24)}d ago`;
 }
 
-// Characters bar — shown at top-right when logged in. Chip per character +
-// an "Add" button to link another character + a "Sync All" button.
-// Each chip shows a sync status dot and tooltip with last sync time or error.
+// Characters bar — shown at top-right when logged in. Shows ONLY the FIRST
+// linked character's chip + a Sync All button. Additional characters exist
+// in data and are visible/managed via the Characters tab (reachable via the
+// per-project 'More' drawer). The '+ Add' button has also moved to the
+// Characters tab. This keeps the top-bar minimal while letting the user
+// reach a full character list on demand.
 function renderCharactersBar() {
   const chars = esiAuth.getLinkedCharacters();
   const statuses = esiApi.getPerCharacterStatus();
   const anySyncing = chars.some(c => statuses[c.characterID]?.syncing);
   const anySynced = chars.some(c => statuses[c.characterID]?.syncedAt);
 
-  const chips = chars.map(c => {
-    const s = statuses[c.characterID] || {};
+  // Only render a chip for the first character; the rest live in the
+  // Characters tab now.
+  const primary = chars[0];
+  let chips = '';
+  if (primary) {
+    const s = statuses[primary.characterID] || {};
     let dotCls = 'char-chip-dot-unsynced';
     let dotTitle = 'Not synced yet — click Sync All or this chip';
     if (s.syncing) { dotCls = 'char-chip-dot-syncing'; dotTitle = 'Syncing…'; }
     else if (s.error) { dotCls = 'char-chip-dot-error'; dotTitle = `Last sync error: ${s.error}`; }
     else if (s.syncedAt) { dotCls = 'char-chip-dot-ok'; dotTitle = fmtSyncAge(s.syncedAt); }
-    return `
-      <div class="char-chip" title="${escapeHtml(dotTitle)}" data-sync-char="${c.characterID}">
-        <img class="char-chip-avatar" src="https://images.evetech.net/characters/${c.characterID}/portrait?size=32" alt="" onerror="this.style.opacity='0.3'">
-        <span class="char-chip-name">${escapeHtml(c.characterName)}</span>
+    // Add a small indicator if there are MORE characters beyond this one,
+    // so the user has a visual hint that the Characters tab has content.
+    const othersCount = chars.length - 1;
+    const othersBadge = othersCount > 0
+      ? `<span class="char-chip-others" title="${othersCount} more in Characters tab">+${othersCount}</span>`
+      : '';
+    chips = `
+      <div class="char-chip" title="${escapeHtml(dotTitle)}" data-sync-char="${primary.characterID}">
+        <img class="char-chip-avatar" src="https://images.evetech.net/characters/${primary.characterID}/portrait?size=32" alt="" onerror="this.style.opacity='0.3'">
+        <span class="char-chip-name">${escapeHtml(primary.characterName)}</span>
         <span class="char-chip-dot ${dotCls}"></span>
-        <span class="char-chip-remove" data-remove-char="${c.characterID}" title="Remove this character">×</span>
+        ${othersBadge}
       </div>
     `;
-  }).join('');
+  }
 
   const syncLabel = anySyncing ? 'Syncing…' : (anySynced ? 'Resync All' : 'Sync All');
   const syncDisabled = anySyncing ? 'disabled' : '';
@@ -7764,7 +7836,6 @@ function renderCharactersBar() {
       <button class="char-sync-btn" id="esi-sync-all-btn" ${syncDisabled} title="Fetch assets, blueprints, and industry jobs from ESI for every linked character">
         ${syncLabel}
       </button>
-      <button class="char-add-btn" id="esi-add-char-btn">+ Add</button>
     </div>
   `;
 }
@@ -11624,15 +11695,34 @@ function bpName(bpTypeID) {
 
 function renderCharactersTab(project) {
   const linked = esiAuth.getLinkedCharacters();
+  const statuses = esiApi.getPerCharacterStatus();
+
+  // '+ Add Character' card — available in both empty and populated states.
+  // This card replaces the top-bar '+ Add' button; all new-character linking
+  // flows begin here now.
+  const addCard = `
+    <div class="chars-tab-add-card">
+      <div class="chars-tab-add-title">Link Another Character</div>
+      <div class="chars-tab-add-desc">
+        Authorize via EVE SSO to add another character's assets, blueprints,
+        and industry jobs to your pool. Each character you link multiplies
+        the inventory and parallel-job slots available to your projects.
+      </div>
+      <button class="char-add-btn" id="esi-add-char-btn" style="margin-top: 10px;">
+        + Add Character (EVE SSO)
+      </button>
+    </div>
+  `;
+
   if (linked.length === 0) {
     return `
-      <div class="assets-empty-state">
-        <div class="assets-empty-icon">◇</div>
-        <div class="assets-empty-title">No characters linked</div>
-        <div class="assets-empty-desc">
-          Add a character via the top-right "+ Add" button, then return here to
-          choose which characters contribute assets and blueprints to this project.
-        </div>
+      <div class="q2-section-label">
+        <span>Characters</span>
+        <div class="divider"></div>
+        <span style="color: #7a8a95; font-family: 'IBM Plex Mono', monospace;">0 LINKED</span>
+      </div>
+      <div style="padding: 0 16px;">
+        ${addCard}
       </div>
     `;
   }
@@ -11643,15 +11733,29 @@ function renderCharactersTab(project) {
 
   const rows = linked.map(c => {
     const isActive = activeIds.has(String(c.characterID));
+    // Per-character sync status — the dot + tooltip that used to live only
+    // in the top-bar chip is now also on this row, because the top-bar only
+    // shows the first character. For non-primary characters this is your
+    // only view of their sync state.
+    const s = statuses[c.characterID] || {};
+    let dotCls = 'char-chip-dot-unsynced';
+    let dotTitle = 'Not synced yet — click Sync All in the top bar';
+    if (s.syncing) { dotCls = 'char-chip-dot-syncing'; dotTitle = 'Syncing…'; }
+    else if (s.error) { dotCls = 'char-chip-dot-error'; dotTitle = `Last sync error: ${s.error}`; }
+    else if (s.syncedAt) { dotCls = 'char-chip-dot-ok'; dotTitle = fmtSyncAge(s.syncedAt); }
     return `
       <label class="chars-tab-row ${isActive ? 'active' : 'inactive'}">
         <input type="checkbox" data-toggle-char="${escapeHtml(String(c.characterID))}" ${isActive ? 'checked' : ''}>
         <span class="chars-tab-check"></span>
         <img class="chars-tab-avatar" src="https://images.evetech.net/characters/${c.characterID}/portrait?size=32" alt="" onerror="this.style.opacity='0.3'">
         <div class="chars-tab-info">
-          <div class="chars-tab-name">${escapeHtml(c.characterName)}</div>
+          <div class="chars-tab-name">
+            ${escapeHtml(c.characterName)}
+            <span class="char-chip-dot ${dotCls}" title="${escapeHtml(dotTitle)}" style="margin-left: 6px; vertical-align: middle;"></span>
+          </div>
           <div class="chars-tab-state">${isActive ? 'Contributing assets + BPCs' : 'Excluded from this project'}</div>
         </div>
+        <button type="button" class="chars-tab-remove" data-remove-char="${c.characterID}" title="Unlink this character — removes its assets and tokens">×</button>
       </label>
     `;
   }).join('');
@@ -11679,6 +11783,9 @@ function renderCharactersTab(project) {
         </button>
       </div>
     ` : ''}
+    <div style="padding: 0 16px 16px;">
+      ${addCard}
+    </div>
   `;
 }
 
@@ -11856,7 +11963,19 @@ function bindHandlers(project) {
   // the scroll-preserving render.
   document.querySelectorAll('[data-right-tab]').forEach(el => {
     el.addEventListener('click', () => {
-      state.rightTab = el.dataset.rightTab;
+      const nextTab = el.dataset.rightTab;
+      state.rightTab = nextTab;
+      // When the user clicks one of the default 'exit' tabs (material, assets,
+      // queue), also collapse the active project's More drawer for a clean
+      // look. The drawer's whole purpose is to jump INTO stations/characters;
+      // once you've left those views, the drawer has no reason to stay open.
+      // Clicks from the drawer's own pills (which go TO stations/characters)
+      // don't trigger collapse — the drawer is the entry point for those.
+      const isExitTab = nextTab === 'material' || nextTab === 'assets' || nextTab === 'queue';
+      if (isExitTab && state.activeProjectId && state.projectCardExpanded[state.activeProjectId]) {
+        state.projectCardExpanded[state.activeProjectId] = false;
+        saveProjectCardExpanded();
+      }
       renderPreservingQuadScroll();
     });
   });
