@@ -5520,6 +5520,26 @@ function rigSecurityMultiplier(systemSecurity, isWormhole, wormholeClass) {
   return 2.1;                              // nullsec (≤0.0)
 }
 
+// Security multiplier for REACTION rigs (Phase 2b). Reaction rigs use a
+// much flatter curve than manufacturing rigs — this is a CCP design choice
+// to keep reaction output relatively consistent across space types.
+//
+// Source: EVERef type 46486 (Composite Reactor ME I) dogma attributes:
+//   dogma_attribute 2356 'Low Security Bonus Multiplier' = 1.0
+//   dogma_attribute 2357 'Nullsec and Wormhole Bonus Multiplier' = 1.1
+//
+// So a T1 Composite ME rig at -2% base at null gives only -2.2% (not the
+// -4.2% you'd get from a comparable mfg rig at null). This is a critical
+// correctness detail — reusing rigSecurityMultiplier for reactions would
+// roughly double the applied bonus.
+function reactionSecurityMultiplier(systemSecurity, isWormhole, wormholeClass) {
+  if (isWormhole) return 1.1;              // any WH class → 1.1x
+  if (systemSecurity == null) return 1.0;  // unknown → neutral
+  if (systemSecurity >= 0.45) return 1.0;  // hisec
+  if (systemSecurity > 0.0)   return 1.0;  // lowsec — NOTE same as hisec for rxn!
+  return 1.1;                              // nullsec → 1.1x
+}
+
 // Resolve a product's rig category bucket from its typeID.
 // Checks groupId first (PRODUCT_CATEGORY_MAP) then falls back to categoryId
 // (CATEGORY_FALLBACK) if the group isn't explicitly listed. Returns null
@@ -5551,52 +5571,79 @@ function productRigCategory(productTypeID) {
   return null;
 }
 
-// Main entry point. See block comment above for full semantics.
-function effectiveMfgBonus(productTypeID, stationID) {
-  // (1) No station context → neutral. Walker won't apply any reduction.
+// =====================================================================
+// MAIN ENTRY POINT (Phase 2b) — effectiveBonus(activity, productTypeID, stationID)
+// =====================================================================
+//
+// Returns the station-portion material multiplier for producing a given
+// typeID at a given station via a given activity. Handles both:
+//   - Manufacturing activities ('manufacturing')
+//   - Reaction activities ('reaction', 'composite_reaction',
+//                          'advanced_reaction', 'biochem_reaction')
+//
+// Routes to the appropriate structure role bonus (mfgMaterial vs reactionMat)
+// and filters fitted rigs by matching activity. Reaction rigs and mfg rigs
+// never stack — they're parallel systems for different activities.
+//
+// Returns: a MULTIPLIER in (0, 1]. E.g. 0.9780 means "materials reduced to
+// 97.8%" (i.e. -2.2%). Returns 1.0 (neutral) for any unresolved case.
+//
+// Fallbacks (in order):
+//   1. No stationID           → 1.0
+//   2. No stationConfig       → legacy flat LOCATIONS[x].mfgMat / .reactionMat
+//   3. No structureType       → 1.0
+//   4. No product category    → structure role only
+//   5. No matching rigs       → structure role only
+function effectiveBonus(activity, productTypeID, stationID) {
+  // (1) No station context → neutral
   if (!stationID) return 1.0;
 
+  // Classify activity — treat all reaction variants uniformly.
+  const isReaction = (
+    activity === 'reaction' ||
+    activity === 'composite_reaction' ||
+    activity === 'advanced_reaction' ||
+    activity === 'biochem_reaction' ||
+    activity === 'hybrid_reaction'
+  );
+  const rigActivityKey = isReaction ? 'reaction' : 'manufacturing';
+
   const cfg = state.stationConfigs[stationID];
-  // (2) Station has no structured config → fall back to legacy flat mfgMat.
-  // This is what makes Increment 3 safe to ship: stations without rig data
-  // keep behaving exactly as they do today.
+  // (2) No structured config → fall back to legacy flat values.
+  // For reactions, use reactionMat; for mfg, use mfgMat.
   if (!cfg) {
-    return LOCATIONS[stationID]?.mfgMat ?? 1.0;
+    const loc = LOCATIONS[stationID];
+    if (!loc) return 1.0;
+    return isReaction ? (loc.reactionMat ?? 1.0) : (loc.mfgMat ?? 1.0);
   }
 
   const struct = STRUCTURE_TYPES[cfg.structureType];
-  // (3) Config present but structureType is unknown → neutral. Shouldn't
-  // happen in practice (UI should only write valid keys) but guard anyway.
   if (!struct) return 1.0;
 
-  // Structure role bonus — applies to everything manufactured here,
-  // regardless of rigs. E.g. Azbel = 0.99 (−1% material).
-  let multiplier = struct.mfgMaterial;
+  // Structure role bonus — pick the right one based on activity.
+  // Azbel: mfgMaterial=0.99, reactionMat=1.00 (no reaction bonus)
+  // Tatara: mfgMaterial=1.00, reactionMat=0.976 (reaction role bonus)
+  let multiplier = isReaction ? struct.reactionMat : struct.mfgMaterial;
 
-  // If no rigs fitted, we're done.
   const rigIds = cfg.rigSlots || [];
   if (rigIds.length === 0) return multiplier;
 
-  // (4) Resolve product's rig category — if we can't, skip rig bonuses.
-  // (Structure role already applied above, so this still returns a sensible
-  // value for raw materials / unknown groups.)
+  // (4) Resolve product's rig category
   const productCategory = productRigCategory(productTypeID);
   if (!productCategory) return multiplier;
 
-  // (5) Apply each fitted rig whose categories include productCategory.
-  // Multiple matching rigs stack MULTIPLICATIVELY (not additively) — this
-  // matches CCP's in-game math. E.g. two -2% rigs = ×0.98 × 0.98, NOT ×0.96.
-  const secMult = rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+  // (5) Apply matching rigs. Crucial: use the right security curve.
+  const secMult = isReaction
+    ? reactionSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass)
+    : rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+
   for (const rigId of rigIds) {
     const rig = RIG_CATALOG[rigId];
-    if (!rig) continue;                                  // unknown rig id
-    if (rig.activity !== 'manufacturing') continue;      // wrong activity
-    if (rig.bonusType !== 'material') continue;          // wrong bonus
-    if (!rig.categories.includes(productCategory)) continue;  // wrong bucket
+    if (!rig) continue;
+    if (rig.activity !== rigActivityKey) continue;       // activity mismatch
+    if (rig.bonusType !== 'material') continue;
+    if (!rig.categories.includes(productCategory)) continue;
 
-    // basePercent is negative (e.g. -2.4). Convert to multiplier via:
-    //   rigMult = 1 + (basePercent * secMult) / 100
-    // For -2.4% at 2.1× security: 1 + (-2.4 * 2.1)/100 = 1 - 0.0504 = 0.9496
     const rigMult = 1 + (rig.basePercent * secMult) / 100;
     multiplier *= rigMult;
   }
@@ -5604,11 +5651,19 @@ function effectiveMfgBonus(productTypeID, stationID) {
   return multiplier;
 }
 
+// Thin wrapper — original name preserved for backwards compat. All existing
+// call sites continue to work unchanged. New code should prefer effectiveBonus.
+function effectiveMfgBonus(productTypeID, stationID) {
+  return effectiveBonus('manufacturing', productTypeID, stationID);
+}
+
 // Expose for browser-console testing during Increments 3-5. Remove or
 // keep after Increment 4 is validated — low cost to leave in, useful
 // if users report incorrect numbers and we need to debug.
 window.effectiveMfgBonus = effectiveMfgBonus;
+window.effectiveBonus = effectiveBonus;
 window.productRigCategory = productRigCategory;
+window.reactionSecurityMultiplier = reactionSecurityMultiplier;
 
 // =====================================================================
 // RIG PICKER HELPERS (Increment 5a + 5b) — pure data, no UI
@@ -5709,60 +5764,49 @@ function getRigFamilies(structureType) {
 // future Phase 2 rigs introduce new buckets (reaction categories etc.)
 // those can be appended without breaking existing ones.
 function computePreviewBonuses(config) {
-  const CATEGORIES = [
+  const MFG_CATEGORIES = [
     'smallShip', 'mediumShip', 'largeShip', 'capitalShip',
     'advancedSmallShip', 'advancedMediumShip', 'advancedLargeShip',
     'component', 'advancedComponent',
     'equipment', 'ammunition',
   ];
-
-  // Temporarily override state.stationConfigs['__preview__'] with the
-  // given config so we can reuse effectiveMfgBonus without refactoring.
-  // Restore the original on exit (or delete the preview key if it was
-  // fresh). This avoids duplicating effectiveMfgBonus's logic.
-  const PREVIEW_KEY = '__preview__';
-  const hadPrior = Object.prototype.hasOwnProperty.call(state.stationConfigs, PREVIEW_KEY);
-  const prior = state.stationConfigs[PREVIEW_KEY];
-  state.stationConfigs[PREVIEW_KEY] = config;
+  const RXN_CATEGORIES = [
+    'compositeReaction', 'biochemReaction', 'hybridReaction',
+  ];
 
   const bonuses = {};
-  try {
-    for (const cat of CATEGORIES) {
-      // Use a dummy typeID with a known category — we short-circuit the
-      // resolver by directly injecting productRigCategory's output. That
-      // means we need a typeID whose category_map entry matches `cat`.
-      //
-      // Simpler approach: pass a sentinel typeID and override the
-      // classifier. Even simpler: call the multiplier math directly
-      // without going through productRigCategory.
-      //
-      // Just reproduce the math inline. This mirrors what effectiveMfgBonus
-      // does but skips the group_id lookup (we already know the category).
-      const struct = STRUCTURE_TYPES[config.structureType];
-      if (!struct) { bonuses[cat] = 0; continue; }
 
-      let multiplier = struct.mfgMaterial;
-      const rigIds = config.rigSlots || [];
-      const secMult = rigSecurityMultiplier(
-        config.systemSecurity, config.isWormhole, config.wormholeClass
-      );
-      for (const rigId of rigIds) {
-        const rig = RIG_CATALOG[rigId];
-        if (!rig) continue;
-        if (rig.activity !== 'manufacturing') continue;
-        if (rig.bonusType !== 'material') continue;
-        if (!rig.categories.includes(cat)) continue;
-        const rigMult = 1 + (rig.basePercent * secMult) / 100;
-        multiplier *= rigMult;
-      }
+  const struct = STRUCTURE_TYPES[config.structureType];
+  if (!struct) return bonuses;
 
-      // Convert multiplier → percent reduction. Round to 2 decimals for display.
-      bonuses[cat] = Math.round((multiplier - 1) * 10000) / 100;
+  // Determine which activity this structure does. Refineries (Athanor,
+  // Tatara) host reactions; engineering complexes (Raitaru, Azbel, Sotiyo,
+  // Keepstar) host manufacturing. Phase 2b scope: only preview the ONE
+  // activity this structure is built for. If future structures host both,
+  // this can be generalized.
+  const isRefinery = struct.category === 'refinery';
+  const activityKey = isRefinery ? 'reaction' : 'manufacturing';
+  const baseRole = isRefinery ? struct.reactionMat : struct.mfgMaterial;
+  const secMult = isRefinery
+    ? reactionSecurityMultiplier(config.systemSecurity, config.isWormhole, config.wormholeClass)
+    : rigSecurityMultiplier(config.systemSecurity, config.isWormhole, config.wormholeClass);
+  const categories = isRefinery ? RXN_CATEGORIES : MFG_CATEGORIES;
+
+  for (const cat of categories) {
+    let multiplier = baseRole;
+    const rigIds = config.rigSlots || [];
+    for (const rigId of rigIds) {
+      const rig = RIG_CATALOG[rigId];
+      if (!rig) continue;
+      if (rig.activity !== activityKey) continue;
+      if (rig.bonusType !== 'material') continue;
+      if (!rig.categories.includes(cat)) continue;
+      const rigMult = 1 + (rig.basePercent * secMult) / 100;
+      multiplier *= rigMult;
     }
-  } finally {
-    // Restore state
-    if (hadPrior) state.stationConfigs[PREVIEW_KEY] = prior;
-    else delete state.stationConfigs[PREVIEW_KEY];
+
+    // Convert multiplier → percent reduction. Round to 2 decimals.
+    bonuses[cat] = Math.round((multiplier - 1) * 10000) / 100;
   }
 
   return bonuses;
@@ -8165,8 +8209,19 @@ function renderRigPickerModal() {
     // Use the 5b helper. Pass the current working config so the user sees
     // exactly what will be saved if they click Save right now.
     const bonuses = computePreviewBonuses(cfg);
-    // Friendly labels + display order matching the rig family order.
-    const CAT_DISPLAY = [
+
+    // Activity-aware labels and baseline (Phase 2d). Refineries show reaction
+    // categories + reaction role baseline; engineering complexes show mfg.
+    const isRefinery = struct.category === 'refinery';
+    const previewTitle = isRefinery ? 'Effective Reaction Bonuses' : 'Effective Manufacturing Bonuses';
+    const previewHint = isRefinery
+      ? 'Verify against EVE\'s in-game Reactions info. Amber rows mean a fitted rig is actively boosting that reaction type.'
+      : 'Verify against EVE\'s in-game Manufacturing info (right-click station → Show Info). Amber rows mean a fitted rig is actively boosting that category.';
+    const baselineMult = isRefinery ? struct.reactionMat : struct.mfgMaterial;
+    const baseline = Math.round((baselineMult - 1) * 10000) / 100;
+
+    // Display category lists — one for mfg structures, one for refineries.
+    const MFG_CAT_DISPLAY = [
       ['smallShip',         'Small Ships (T1)'],
       ['mediumShip',        'Medium Ships (T1)'],
       ['largeShip',         'Large Ships (T1)'],
@@ -8179,10 +8234,13 @@ function renderRigPickerModal() {
       ['equipment',         'Modules / Equipment'],
       ['ammunition',        'Ammunition / Charges'],
     ];
-    // Structure role baseline — the percent you'd get with NO matching rigs.
-    // We use this to detect whether a category is "boosted" by a fitted rig
-    // vs. just inheriting the structure role. Tiny epsilon for float safety.
-    const baseline = Math.round((struct.mfgMaterial - 1) * 10000) / 100;
+    const RXN_CAT_DISPLAY = [
+      ['compositeReaction', 'Composite Reactions'],
+      ['biochemReaction',   'Biochemical Reactions'],
+      ['hybridReaction',    'Hybrid Reactions'],
+    ];
+    const CAT_DISPLAY = isRefinery ? RXN_CAT_DISPLAY : MFG_CAT_DISPLAY;
+
     const cells = CAT_DISPLAY.map(([cat, label]) => {
       const pct = bonuses[cat] ?? 0;
       const boosted = Math.abs(pct - baseline) > 0.01;
@@ -8194,10 +8252,9 @@ function renderRigPickerModal() {
     }).join('');
     previewHtml = `
       <div class="rp-preview">
-        <div class="rp-preview-title">Effective Manufacturing Bonuses</div>
+        <div class="rp-preview-title">${escapeHtml(previewTitle)}</div>
         <div class="rp-preview-hint">
-          Verify against EVE's in-game Manufacturing info (right-click station → Show Info).
-          Amber rows mean a fitted rig is actively boosting that category.
+          ${escapeHtml(previewHint)}
         </div>
         <div class="rp-preview-grid">${cells}</div>
       </div>
@@ -8252,9 +8309,9 @@ function renderRigPickerModal() {
               <label class="rp-label">System Security</label>
               <select class="rp-select" data-rp-security>
                 <option value="" ${cfg.systemSecurity == null ? 'selected' : ''}>— Select —</option>
-                <option value="0.5"  ${cfg.systemSecurity != null && cfg.systemSecurity >= 0.45                      ? 'selected' : ''}>High Sec (1.0×)</option>
-                <option value="0.3"  ${cfg.systemSecurity != null && cfg.systemSecurity < 0.45 && cfg.systemSecurity > 0 ? 'selected' : ''}>Low Sec (1.9×)</option>
-                <option value="-0.1" ${cfg.systemSecurity != null && cfg.systemSecurity <= 0                        ? 'selected' : ''}>Null Sec (2.1×)</option>
+                <option value="0.5"  ${cfg.systemSecurity != null && cfg.systemSecurity >= 0.45                      ? 'selected' : ''}>High Sec (Mfg 1.0× · Rxn 1.0×)</option>
+                <option value="0.3"  ${cfg.systemSecurity != null && cfg.systemSecurity < 0.45 && cfg.systemSecurity > 0 ? 'selected' : ''}>Low Sec (Mfg 1.9× · Rxn 1.0×)</option>
+                <option value="-0.1" ${cfg.systemSecurity != null && cfg.systemSecurity <= 0                        ? 'selected' : ''}>Null Sec (Mfg 2.1× · Rxn 1.1×)</option>
               </select>
             </div>
           </div>
@@ -8412,7 +8469,7 @@ function bpcMEAt(bpTypeID, locationID) {
 // portion and the BP portion compose multiplicatively.
 function materialMultiplier(activity, bpTypeID, locationID, productTypeID) {
   const loc = LOCATIONS[locationID];
-  const isReaction = activity === 'composite_reaction' || activity === 'advanced_reaction';
+  const isReaction = activity === 'composite_reaction' || activity === 'advanced_reaction' || activity === 'reaction' || activity === 'biochem_reaction' || activity === 'hybrid_reaction';
 
   // BPC ME: manufacturing only. Reactions have no ME research.
   let meBonus = 1.0;
@@ -8421,25 +8478,21 @@ function materialMultiplier(activity, bpTypeID, locationID, productTypeID) {
     if (me != null) meBonus = 1 - me / 100;
   }
 
-  // Structure portion.
+  // Structure portion — now uses the unified effectiveBonus for both mfg AND
+  // reaction activities (Phase 2c). When productTypeID is known, this applies:
+  //   - structure role bonus (mfgMaterial for mfg, reactionMat for reactions)
+  //   - fitted rigs matching the activity (mfg rigs vs reaction rigs)
+  //   - correct security multiplier (mfg curve vs reaction curve — reactions
+  //     use a much flatter curve, 1.0x hisec/lowsec, 1.1x null/WH)
   //
-  // For manufacturing with a known productTypeID, use the rig-aware lookup
-  // (Increment 3). It factors in structure role + fitted-rig bonuses +
-  // security multiplier — the correct model for EVE's material economics.
-  //
-  // For manufacturing without a known productTypeID, fall back to the flat
-  // LOCATIONS[x].mfgMat value. This path is hit only by callers that haven't
-  // been upgraded yet (or by legacy LOCATIONS entries where stationConfigs
-  // isn't set — the old -1% assumption).
-  //
-  // Reactions continue to use the flat reactionMat for now. Reaction rigs
-  // exist too but they're out of scope for Increment 4 — will be added in
-  // Phase 2 of the rig rollout.
+  // When productTypeID is missing (rare — legacy callers), fall back to the
+  // flat LOCATIONS value. That path doesn't see rig bonuses but keeps old
+  // call sites working.
   let structBonus;
-  if (isReaction) {
+  if (productTypeID) {
+    structBonus = effectiveBonus(activity, productTypeID, locationID);
+  } else if (isReaction) {
     structBonus = loc?.reactionMat ?? 1.0;
-  } else if (productTypeID) {
-    structBonus = effectiveMfgBonus(productTypeID, locationID);
   } else {
     structBonus = loc?.mfgMat ?? 1.0;
   }
@@ -10583,13 +10636,24 @@ function stationRigSummary(stationID) {
 
   // Rigged — compute a tooltip that mirrors EVE's info panel format.
   const struct = STRUCTURE_TYPES[cfg.structureType];
-  const secMult = rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+
+  // Activity-aware logic (Phase 2e). Refineries show reaction info; engineering
+  // complexes show manufacturing info. Each uses its own security multiplier
+  // curve and its own structure role bonus.
+  const isRefinery = struct.category === 'refinery';
+  const rigActivity = isRefinery ? 'reaction' : 'manufacturing';
+  const secMult = isRefinery
+    ? reactionSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass)
+    : rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+  const structRoleBonus = isRefinery ? struct.reactionMat : struct.mfgMaterial;
+  const tooltipHeaderTitle = isRefinery ? 'Reactions' : 'Manufacturing';
 
   // Build the "TYPES SUPPORTED" list — categories that actually get a
   // non-baseline bonus. For each fitted rig that targets a category, that
   // category appears here with the rig's effective percent (basePercent ×
   // security multiplier). Categories not touched by any rig don't appear.
   const CAT_LABELS = {
+    // Manufacturing categories
     smallShip: 'Frigates & Destroyers (T1)',
     mediumShip: 'Cruisers & BCs (T1)',
     largeShip: 'Battleships (T1)',
@@ -10601,6 +10665,10 @@ function stationRigSummary(stationID) {
     advancedComponent: 'Components (T2)',
     equipment: 'Modules / Equipment',
     ammunition: 'Ammunition / Charges',
+    // Reaction categories
+    compositeReaction: 'Composite Reactions',
+    biochemReaction: 'Biochemical Reactions',
+    hybridReaction: 'Hybrid Reactions',
   };
 
   // categoryEffects accumulates the total rig effect per category.
@@ -10609,7 +10677,11 @@ function stationRigSummary(stationID) {
   const categoryEffects = {};  // category → combined multiplier (starts at 1.0)
   const fittedRigs = (cfg.rigSlots || []).map(id => RIG_CATALOG[id]).filter(Boolean);
   for (const rig of fittedRigs) {
-    if (rig.activity !== 'manufacturing' || rig.bonusType !== 'material') continue;
+    // Activity-aware filter: on a refinery, only reaction rigs contribute;
+    // on an engineering complex, only manufacturing rigs. This matters
+    // because a user could theoretically have inconsistent rig data saved
+    // (e.g. mfg rig on Athanor — shouldn't happen via UI but defend anyway).
+    if (rig.activity !== rigActivity || rig.bonusType !== 'material') continue;
     const rigMult = 1 + (rig.basePercent * secMult) / 100;
     for (const cat of rig.categories) {
       categoryEffects[cat] = (categoryEffects[cat] ?? 1.0) * rigMult;
@@ -10629,23 +10701,24 @@ function stationRigSummary(stationID) {
 
   // Build the "MATERIAL CONSUMPTION MODIFIERS" list — structure role and
   // each fitted rig listed individually with their effective percent.
-  const structPct = ((struct.mfgMaterial - 1) * 100).toFixed(1);
+  const structPct = ((structRoleBonus - 1) * 100).toFixed(1);
   const structRow = `
     <div class="stations-tooltip-row">
       <span class="stations-tooltip-row-label">Structure Role Bonus</span>
       <span class="stations-tooltip-row-val">${structPct}%</span>
     </div>
   `;
-  const rigRows = fittedRigs.map(rig => {
-    const effPct = (rig.basePercent * secMult).toFixed(1);
-    // Short name minus tier marker for display (e.g. "Basic Large Ship ME I")
-    return `
-      <div class="stations-tooltip-row">
-        <span class="stations-tooltip-row-label">${escapeHtml(rig.name)}</span>
-        <span class="stations-tooltip-row-val">${effPct}%</span>
-      </div>
-    `;
-  }).join('');
+  const rigRows = fittedRigs
+    .filter(rig => rig.activity === rigActivity && rig.bonusType === 'material')
+    .map(rig => {
+      const effPct = (rig.basePercent * secMult).toFixed(1);
+      return `
+        <div class="stations-tooltip-row">
+          <span class="stations-tooltip-row-label">${escapeHtml(rig.name)}</span>
+          <span class="stations-tooltip-row-val">${effPct}%</span>
+        </div>
+      `;
+    }).join('');
 
   const secLabel = cfg.systemSecurity != null
     ? `${cfg.systemSecurity.toFixed(1)} sec`
@@ -10655,7 +10728,7 @@ function stationRigSummary(stationID) {
     status: 'rigged',
     pillText: 'RIGGED',
     tooltipHtml: `
-      <div class="stations-tooltip-title">Manufacturing</div>
+      <div class="stations-tooltip-title">${escapeHtml(tooltipHeaderTitle)}</div>
       <div class="stations-tooltip-sub">${escapeHtml(struct.name)} · ${escapeHtml(secLabel)}</div>
       <div class="stations-tooltip-body">
         ${typeRows ? `
