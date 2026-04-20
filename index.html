@@ -7834,10 +7834,12 @@ function renderRigPickerModal() {
             </div>
             <div class="rp-field">
               <label class="rp-label">System Security</label>
-              <input class="rp-input" type="number" step="0.1" min="-1.0" max="1.0"
-                data-rp-security
-                value="${cfg.systemSecurity != null ? cfg.systemSecurity : ''}"
-                placeholder="-0.1 / 0.4 / 0.9">
+              <select class="rp-select" data-rp-security>
+                <option value="" ${cfg.systemSecurity == null ? 'selected' : ''}>— Select —</option>
+                <option value="0.5"  ${cfg.systemSecurity != null && cfg.systemSecurity >= 0.45                      ? 'selected' : ''}>High Sec (1.0×)</option>
+                <option value="0.3"  ${cfg.systemSecurity != null && cfg.systemSecurity < 0.45 && cfg.systemSecurity > 0 ? 'selected' : ''}>Low Sec (1.9×)</option>
+                <option value="-0.1" ${cfg.systemSecurity != null && cfg.systemSecurity <= 0                        ? 'selected' : ''}>Null Sec (2.1×)</option>
+              </select>
             </div>
           </div>
 
@@ -11784,28 +11786,26 @@ function wireRigPickerModalHandlers() {
     });
   }
 
-  // System security input — live-update. Accepts floats like -0.1 or 0.4.
-  // Empty input leaves systemSecurity null so the rig multiplier logic uses
-  // its safe default (1.0× = hisec equivalent).
-  const secInput = document.querySelector('[data-rp-security]');
-  if (secInput) {
-    secInput.addEventListener('input', (e) => {
-      const raw = e.target.value.trim();
+  // System security dropdown — three buckets (HS / LS / NS). We store a
+  // canonical numeric value for each bucket so the rest of the tool's
+  // security-aware math (rigSecurityMultiplier) can classify correctly
+  // without any refactoring:
+  //   High Sec   → 0.5  (classified as hisec, 1.0× multiplier)
+  //   Low Sec    → 0.3  (classified as lowsec, 1.9× multiplier)
+  //   Null Sec   → -0.1 (classified as nullsec, 2.1× multiplier)
+  //   (empty)    → null (uses safe default in the lookup)
+  //
+  // Wormhole space (1.9× C1-C3, 2.6× C4-C6) isn't in the dropdown yet —
+  // add it in Phase 2 when WH rigs matter.
+  const secSelect = document.querySelector('[data-rp-security]');
+  if (secSelect) {
+    secSelect.addEventListener('change', (e) => {
+      const raw = e.target.value;
       const cfg = state.rigPickerModal.workingConfig || {};
       cfg.systemSecurity = raw === '' ? null : parseFloat(raw);
       state.rigPickerModal.workingConfig = cfg;
       resetConfirm();
       render();
-      // Restore focus & cursor after re-render (otherwise the user loses
-      // focus on every keystroke)
-      requestAnimationFrame(() => {
-        const el = document.querySelector('[data-rp-security]');
-        if (el) {
-          el.focus();
-          const len = el.value.length;
-          try { el.setSelectionRange(len, len); } catch (_) {}
-        }
-      });
     });
   }
 
