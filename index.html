@@ -5706,8 +5706,14 @@ const LOCATION_NAME_TO_ID = {
 // everything and letting ensureProjectRecipes discover the chain is friendlier.
 const typeCatalog = (() => {
   const CACHE_KEY = 'eveIndustry.typeCatalog.v1';
+  const MFG_IDX_KEY = 'eveIndustry.manufacturableIndex.v1';
   let entries = null;  // Array<{id, name, nameLower}> — null until loaded
   let loading = null;  // in-flight Promise
+  // Set<number> of productTypeIDs that appear as products of at least one
+  // blueprint (activityID 1 = manufacturing, 11 = reaction). Used to filter
+  // the search results so the New Project picker only shows things the
+  // user could actually build. Null until loaded.
+  let manufacturableSet = null;
 
   function loadFromStorage() {
     try {
@@ -5727,6 +5733,54 @@ const typeCatalog = (() => {
     } catch (e) {
       console.warn('[typeCatalog] persist failed (probably quota):', e.message);
     }
+  }
+
+  // Load the manufacturable productTypeID set from localStorage. Stored as a
+  // plain array (Set doesn't JSON-serialize), hydrated back to a Set on read.
+  function loadMfgIdxFromStorage() {
+    try {
+      const raw = localStorage.getItem(MFG_IDX_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) return null;
+      return new Set(parsed);
+    } catch (_) { return null; }
+  }
+
+  function saveMfgIdxToStorage(set) {
+    try {
+      localStorage.setItem(MFG_IDX_KEY, JSON.stringify(Array.from(set)));
+    } catch (e) {
+      console.warn('[manufacturableIndex] persist failed (probably quota):', e.message);
+    }
+  }
+
+  // Parse industryActivityProducts.csv. Columns are:
+  //   typeID (blueprint), activityID, productTypeID, quantity
+  //
+  // We keep only productTypeID where activityID is 1 (manufacturing) or 11
+  // (reaction). Invention (8), copy (5), ME research (4), TE research (3),
+  // etc. don't produce new items in the "manufacturable good" sense.
+  //
+  // The CSV is small (~500 KB, ~70k rows) — trivial compared to invTypes.
+  function parseMfgProductsCSV(text) {
+    const lines = text.split(/\r?\n/);
+    if (lines.length < 2) return new Set();
+    const set = new Set();
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      // Columns here never contain commas in string form (all numeric), so
+      // simple split is safe. Kept consistent with csvSplit for defense.
+      const cols = csvSplit(line);
+      if (cols.length < 3) continue;
+      const activityID = Number(cols[1]);
+      const productTypeID = Number(cols[2]);
+      if (!productTypeID) continue;
+      if (activityID !== 1 && activityID !== 11) continue;  // manufacturing or reaction only
+      set.add(productTypeID);
+    }
+    return set;
   }
 
   // Parse Fuzzworks invTypes.csv. We only need typeID, typeName, published.
@@ -5779,31 +5833,75 @@ const typeCatalog = (() => {
   }
 
   async function ensureLoaded(onProgress) {
-    if (entries) return entries;
+    // Both data sets need to be ready before search works correctly. If we
+    // already have them in memory, done. Otherwise try cache, then network.
+    if (entries && manufacturableSet) return entries;
     if (loading) return loading;
-    // Try localStorage first
-    const cached = loadFromStorage();
-    if (cached) { entries = cached; return entries; }
-    // Fetch from Fuzzworks (CORS-enabled, no auth)
+
     loading = (async () => {
-      if (onProgress) onProgress('fetching');
-      const r = await fetch('https://www.fuzzwork.co.uk/dump/latest/invTypes.csv');
-      if (!r.ok) throw new Error(`Fuzzworks invTypes.csv HTTP ${r.status}`);
-      if (onProgress) onProgress('parsing');
-      const text = await r.text();
-      const arr = parseCSV(text);
-      if (arr.length === 0) throw new Error('Type catalog parsed 0 rows');
-      entries = arr;
-      saveToStorage(arr);
+      // Stage 1: type catalog (invTypes)
+      if (!entries) {
+        const cached = loadFromStorage();
+        if (cached) {
+          entries = cached;
+        } else {
+          if (onProgress) onProgress('fetching');
+          const r = await fetch('https://www.fuzzwork.co.uk/dump/latest/invTypes.csv');
+          if (!r.ok) throw new Error(`Fuzzworks invTypes.csv HTTP ${r.status}`);
+          if (onProgress) onProgress('parsing');
+          const text = await r.text();
+          const arr = parseCSV(text);
+          if (arr.length === 0) throw new Error('Type catalog parsed 0 rows');
+          entries = arr;
+          saveToStorage(arr);
+        }
+      }
+
+      // Stage 2: manufacturable index (industryActivityProducts)
+      if (!manufacturableSet) {
+        const cachedIdx = loadMfgIdxFromStorage();
+        if (cachedIdx) {
+          manufacturableSet = cachedIdx;
+        } else {
+          if (onProgress) onProgress('fetching-products');
+          const r = await fetch('https://www.fuzzwork.co.uk/dump/latest/industryActivityProducts.csv');
+          if (!r.ok) throw new Error(`Fuzzworks industryActivityProducts.csv HTTP ${r.status}`);
+          if (onProgress) onProgress('parsing-products');
+          const text = await r.text();
+          const set = parseMfgProductsCSV(text);
+          if (set.size === 0) throw new Error('Manufacturable index parsed 0 rows');
+          manufacturableSet = set;
+          saveMfgIdxToStorage(set);
+        }
+      }
+
       if (onProgress) onProgress('ready');
       loading = null;
-      return arr;
+      return entries;
     })();
     return loading;
   }
 
-  // Return up to N entries whose name contains the query (case-insensitive).
-  // Ranks exact-prefix matches first, then prefix, then substring.
+  // Name-based defensive filters. The manufacturable Set already excludes
+  // blueprints and skins (they're never *products* of other blueprints), but
+  // these patterns catch edge cases like items CCP left in the SDE with odd
+  // flags. Cheap to run, so we layer them on top.
+  function isBlueprintName(name) {
+    // Blueprint names always end with ' Blueprint' or ' Blueprint Copy'.
+    // Reaction formulas end with ' Reaction Formula' — those ARE used as
+    // inputs to reactions, so we keep them out of the product picker too.
+    return /\bBlueprint$/.test(name)
+      || /\bBlueprint\s+Copy$/.test(name)
+      || /\bReaction\s+Formula$/.test(name);
+  }
+  function isSkinName(name) {
+    // SKINs appear as "Shipname SKIN (Flavor Name)" in the SDE.
+    return /\bSKIN\b/.test(name);
+  }
+
+  // Return up to N entries whose name contains the query (case-insensitive)
+  // AND that pass the manufacturable filter. Ranks exact-prefix matches
+  // first, then prefix, then substring.
   function search(query, limit = 15) {
     if (!entries) return [];
     const q = query.trim().toLowerCase();
@@ -5811,6 +5909,16 @@ const typeCatalog = (() => {
     const prefix = [];
     const contains = [];
     for (const e of entries) {
+      // Apply manufacturable filter first — skips entire buckets of cruft
+      // (ores, raw materials, skills, NPC loot) before even looking at the
+      // name. If the Set hasn't loaded yet, skip filter (fail-open so the
+      // UI keeps working during initial load — user can still search).
+      if (manufacturableSet && !manufacturableSet.has(e.id)) continue;
+      // Belt-and-suspenders: name-based filters for anything that slipped
+      // through (shouldn't happen for these two categories, but cheap check).
+      if (isBlueprintName(e.name)) continue;
+      if (isSkinName(e.name)) continue;
+
       const idx = e.nameLower.indexOf(q);
       if (idx === 0) prefix.push(e);
       else if (idx > 0) contains.push(e);
@@ -5828,12 +5936,14 @@ const typeCatalog = (() => {
     return entries.find(e => e.id === id) || null;
   }
 
-  function isLoaded() { return !!entries; }
+  function isLoaded() { return !!entries && !!manufacturableSet; }
 
   function clear() {
     entries = null;
     loading = null;
+    manufacturableSet = null;
     try { localStorage.removeItem(CACHE_KEY); } catch (_) {}
+    try { localStorage.removeItem(MFG_IDX_KEY); } catch (_) {}
   }
 
   return { ensureLoaded, search, getById, isLoaded, clear };
@@ -6632,7 +6742,7 @@ let state = {
     mfgStationID: null,          // destination station for manufacturing
     reactionStationID: null,     // destination station for reactions (can be same)
     catalogLoading: false,
-    catalogStage: '',            // 'fetching' | 'parsing' | 'ready' | ''
+    catalogStage: '',            // 'fetching' | 'parsing' | 'fetching-products' | 'parsing-products' | 'ready' | ''
     error: '',
   },
   // Rig Picker modal state (Increment 5c). Opens when the user clicks the
@@ -7792,7 +7902,13 @@ function renderNewProjectModal() {
               ${m.catalogLoading ? `
                 <div class="np-dropdown">
                   <div class="np-dropdown-loading">
-                    ${m.catalogStage === 'fetching' ? '⟳ FETCHING CATALOG…' : '⟳ PARSING…'}
+                    ${
+                      m.catalogStage === 'fetching' ? '⟳ FETCHING TYPE CATALOG…'
+                      : m.catalogStage === 'parsing' ? '⟳ PARSING TYPES…'
+                      : m.catalogStage === 'fetching-products' ? '⟳ FETCHING MANUFACTURABLE INDEX…'
+                      : m.catalogStage === 'parsing-products' ? '⟳ INDEXING PRODUCTS…'
+                      : '⟳ LOADING…'
+                    }
                   </div>
                 </div>
               ` : m.query && results.length > 0 && !m.selectedTypeID ? `
