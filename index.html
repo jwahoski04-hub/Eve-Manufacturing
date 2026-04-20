@@ -2604,6 +2604,43 @@
     font-family: 'IBM Plex Mono', monospace;
     font-weight: 600;
   }
+  /* Rig status badge (Increment 5e) — clickable, opens the rig picker
+     pre-populated with this station. Two variants:
+       .configured   — station has a saved rig config (amber, label shows
+                        structure type + rig count like "Azbel · 1/2 rigs")
+       .unconfigured — no saved config (dim cyan, label says "Configure") */
+  .stations-rig-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    margin-left: 8px;
+    font-size: 8.5px;
+    letter-spacing: 0.1em;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    vertical-align: middle;
+  }
+  .stations-rig-badge.configured {
+    background: rgba(215, 158, 60, 0.10);
+    border: 1px solid rgba(215, 158, 60, 0.45);
+    color: #d79e3c;
+  }
+  .stations-rig-badge.configured:hover {
+    background: rgba(215, 158, 60, 0.22);
+    color: #ffd684;
+  }
+  .stations-rig-badge.unconfigured {
+    background: rgba(100, 140, 170, 0.06);
+    border: 1px dashed rgba(100, 140, 170, 0.45);
+    color: #7a9ab5;
+  }
+  .stations-rig-badge.unconfigured:hover {
+    background: rgba(100, 140, 170, 0.18);
+    color: #c0d4e5;
+    border-style: solid;
+  }
   .stations-clear-btn {
     width: 100%;
     padding: 7px;
@@ -10144,6 +10181,35 @@ function renderIndustryStationsTab(project) {
             const isSelected = chosen === id;
             const bonusLabel = stationActivityLabel(loc, act.key);
             const isManual = state.manualStations.has(id);
+            // Rig config badge — shows whether this station has structured rig
+            // data. Configured = "Azbel · 1/2 rigs" (amber, clickable to edit);
+            // unconfigured = "Configure" (dim, clickable to open empty picker).
+            // NPC stations are filtered out because they have no rigs.
+            const rigCfg = state.stationConfigs[id];
+            const structInfo = rigCfg ? STRUCTURE_TYPES[rigCfg.structureType] : null;
+            const isNpcStation = loc.type === 'npc_station';
+            let rigBadgeHtml = '';
+            if (!isNpcStation) {
+              if (rigCfg && structInfo) {
+                const numFilled = (rigCfg.rigSlots || []).length;
+                const total = structInfo.rigSlots;
+                rigBadgeHtml = `
+                  <span class="stations-rig-badge configured"
+                        data-edit-rigs="${escapeHtml(id)}"
+                        title="Click to edit rigs">
+                    ${escapeHtml(structInfo.name)} · ${numFilled}/${total} rigs
+                  </span>
+                `;
+              } else {
+                rigBadgeHtml = `
+                  <span class="stations-rig-badge unconfigured"
+                        data-edit-rigs="${escapeHtml(id)}"
+                        title="Click to configure structure type and rigs">
+                    Configure
+                  </span>
+                `;
+              }
+            }
             // Delete rule: block if this station is used by the CURRENT project
             // for either activity (via override or project default).
             const mfgInUse = (overrides.manufacturing || project.manufactureLocation) === id;
@@ -10165,6 +10231,7 @@ function renderIndustryStationsTab(project) {
                     <div class="stations-option-name">
                       ${escapeHtml(loc.shortName || id)}
                       ${isManual ? '<span class="stations-manual-badge">MANUAL</span>' : ''}
+                      ${rigBadgeHtml}
                     </div>
                     <div class="stations-option-sub">${escapeHtml(loc.system || '—')} · ${escapeHtml(loc.region || '—')}</div>
                   </div>
@@ -11049,6 +11116,47 @@ function bindHandlers(project) {
         saveDisabledStations();
       }
       renderPreservingQuadScroll();
+    });
+  });
+
+  // Industry Stations tab: "Configure" / "Azbel · 1/2 rigs" badge → opens
+  // the Rig Picker modal (Increment 5e). Seeds state.rigPickerModal with a
+  // working copy of the existing config (if any) or a fresh shell with
+  // systemSecurity pre-filled from LOCATIONS when we know it.
+  document.querySelectorAll('[data-edit-rigs]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      // Badge is inside a <label> — stop propagation so clicking it doesn't
+      // also fire the station pick radio.
+      e.preventDefault();
+      e.stopPropagation();
+      const stationID = String(el.dataset.editRigs);
+      const existing = state.stationConfigs[stationID];
+      const loc = LOCATIONS[stationID];
+      // Auto-detect system security when the tool has it in LOCATIONS.
+      // If the user has a saved config, honor its systemSecurity value;
+      // otherwise fall back to LOCATIONS[x].security. Either may be null,
+      // which effectiveMfgBonus handles safely (treats as hisec-equivalent).
+      const autoSec = existing
+        ? existing.systemSecurity
+        : (loc && typeof loc.security === 'number' ? loc.security : null);
+      state.rigPickerModal = {
+        open: true,
+        stationID,
+        workingConfig: existing
+          ? {
+              structureType: existing.structureType,
+              rigSlots: Array.isArray(existing.rigSlots) ? [...existing.rigSlots] : [],
+              systemSecurity: autoSec,
+            }
+          : {
+              structureType: null,
+              rigSlots: [],
+              systemSecurity: autoSec,
+            },
+        confirmingSave: false,
+        error: '',
+      };
+      render();
     });
   });
 
