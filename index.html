@@ -6414,7 +6414,7 @@ function computeMaterials(project) {
   // If we know the product's BPC, use real ME math; otherwise fall back to the old flat 1% bonus.
   let multiplier;
   if (productRecipe) {
-    multiplier = materialMultiplier('manufacturing', productRecipe.bpTypeID, mfgLoc);
+    multiplier = materialMultiplier('manufacturing', productRecipe.bpTypeID, mfgLoc, productRecipe.productTypeID);
   } else {
     const loc = LOCATIONS[mfgLoc];
     multiplier = loc?.mfgMat ?? 0.99;
@@ -7375,17 +7375,61 @@ function bpcMEAt(bpTypeID, locationID) {
 // - bpTypeID:   recipe's blueprint/formula typeID (to look up BPC ME)
 // - locationID: where the activity runs (determines structure bonus + which BPC is used)
 // If no BPC is owned at that location, assume ME=0 (conservative — you'd have to buy a fresh BPC).
-function materialMultiplier(activity, bpTypeID, locationID) {
+// Compute the material-consumption multiplier for an input row. Combines the
+// blueprint's ME research (BPC/BPO-level) with the station's manufacturing
+// or reaction bonus (structure + rigs).
+//
+// Signature evolution — Increment 4:
+//   The optional `productTypeID` argument opts in to the new category-aware
+//   rig-model path (effectiveMfgBonus). When omitted, the function falls
+//   back to the legacy flat LOCATIONS[x].mfgMat for backward compat. This
+//   lets new call sites swap in rig-accurate math one at a time without
+//   breaking anything during the rollout.
+//
+// Math:
+//   meBonus      = (100 - bpcME) / 100    for manufacturing (reactions have no ME)
+//   structBonus  = effectiveMfgBonus(productTypeID, locationID)   if productTypeID given
+//                  LOCATIONS[locationID].mfgMat                    otherwise (legacy)
+//                  LOCATIONS[locationID].reactionMat               for reactions
+//   result       = meBonus × structBonus
+//
+// The BP ME portion is NOT in effectiveMfgBonus because ME is a BPC-level
+// thing (different copies of the same BPC have different ME). The station
+// portion and the BP portion compose multiplicatively.
+function materialMultiplier(activity, bpTypeID, locationID, productTypeID) {
   const loc = LOCATIONS[locationID];
   const isReaction = activity === 'composite_reaction' || activity === 'advanced_reaction';
+
   // BPC ME: manufacturing only. Reactions have no ME research.
   let meBonus = 1.0;
   if (!isReaction) {
     const me = bpcMEAt(bpTypeID, locationID);
     if (me != null) meBonus = 1 - me / 100;
   }
-  // Structure bonus — specific to activity
-  const structBonus = isReaction ? (loc?.reactionMat ?? 1.0) : (loc?.mfgMat ?? 1.0);
+
+  // Structure portion.
+  //
+  // For manufacturing with a known productTypeID, use the rig-aware lookup
+  // (Increment 3). It factors in structure role + fitted-rig bonuses +
+  // security multiplier — the correct model for EVE's material economics.
+  //
+  // For manufacturing without a known productTypeID, fall back to the flat
+  // LOCATIONS[x].mfgMat value. This path is hit only by callers that haven't
+  // been upgraded yet (or by legacy LOCATIONS entries where stationConfigs
+  // isn't set — the old -1% assumption).
+  //
+  // Reactions continue to use the flat reactionMat for now. Reaction rigs
+  // exist too but they're out of scope for Increment 4 — will be added in
+  // Phase 2 of the rig rollout.
+  let structBonus;
+  if (isReaction) {
+    structBonus = loc?.reactionMat ?? 1.0;
+  } else if (productTypeID) {
+    structBonus = effectiveMfgBonus(productTypeID, locationID);
+  } else {
+    structBonus = loc?.mfgMat ?? 1.0;
+  }
+
   return meBonus * structBonus;
 }
 
@@ -8439,7 +8483,7 @@ function canStartNow(typeID, qty, project, consumingActivity) {
   if (bpStat.shortfall > 0) return { ready: false, reasons: [`BPC ${recipe.bpName} short ${bpStat.shortfall} runs`], shortfalls: [] };
 
   // Inputs must be physically present at the recipe's activity location.
-  const mult = materialMultiplier(recipe.activity, recipe.bpTypeID, bpLoc);
+  const mult = materialMultiplier(recipe.activity, recipe.bpTypeID, bpLoc, recipe.productTypeID);
   const shortfalls = [];
 
   // Fuel check (reactions only) — fuel at reaction location, not reduced by ME.
@@ -8535,7 +8579,7 @@ function projectTotalNeed(project) {
     if (!recipe) return; // leaf — nothing more to walk
     const cycles = Math.ceil(qty / (recipe.outputQty || 1));
     const loc = locationForActivity(project, recipe.activity);
-    const mult = materialMultiplier(recipe.activity, recipe.bpTypeID, loc);
+    const mult = materialMultiplier(recipe.activity, recipe.bpTypeID, loc, recipe.productTypeID);
     // Fuel
     if (recipe.fuel) {
       totals[recipe.fuel.typeID] = (totals[recipe.fuel.typeID] || 0) + recipe.fuel.qty * cycles;
@@ -8548,7 +8592,7 @@ function projectTotalNeed(project) {
   // Start from product's top-level materials (the ship itself isn't walked — its inputs are)
   const productRecipe = getRecipe(project.product.typeID);
   const topMult = productRecipe
-    ? materialMultiplier('manufacturing', productRecipe.bpTypeID, project.manufactureLocation)
+    ? materialMultiplier('manufacturing', productRecipe.bpTypeID, project.manufactureLocation, productRecipe.productTypeID)
     : (LOCATIONS[project.manufactureLocation]?.mfgMat ?? 1.0);
   for (const m of project.materials) {
     walk(m.typeID, adjustedInputQty(m.qty, project.runs, topMult), 'manufacturing');
@@ -8887,7 +8931,7 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
     //    THIS recipe runs (not the child's consuming location, which could be
     //    different for rxn-output → mfg-input chains).
     const recipeLoc = project ? locationForActivity(project, recipe.activity) : null;
-    const multiplier = project ? materialMultiplier(recipe.activity, recipe.bpTypeID, recipeLoc) : 1.0;
+    const multiplier = project ? materialMultiplier(recipe.activity, recipe.bpTypeID, recipeLoc, recipe.productTypeID) : 1.0;
     childrenHtml += recipe.inputs.map(inp => {
       const childPath = `${pathKey}>${inp.typeID}`;
       const childNeeded = adjustedInputQty(inp.qty, cycles, multiplier);
@@ -8962,7 +9006,7 @@ function aggregateProjectShoppingList(project) {
 
     // Material multiplier for THIS recipe — depends on its activity's location + BPC ME
     const recipeLoc = locationForActivity(project, recipe.activity);
-    const multiplier = materialMultiplier(recipe.activity, recipe.bpTypeID, recipeLoc);
+    const multiplier = materialMultiplier(recipe.activity, recipe.bpTypeID, recipeLoc, recipe.productTypeID);
 
     // Fuel block accumulation — fuel is burned at the recipe's own activity location.
     // Fuel qty is NOT affected by ME/structure bonuses — it's a fixed cost per cycle.
@@ -9014,7 +9058,7 @@ function aggregateProjectShoppingList(project) {
       blueprints[topRecipe.bpTypeID].usedBy.push(topRecipe.name);
     }
 
-    const topMultiplier = materialMultiplier(topRecipe.activity, topRecipe.bpTypeID, locationForActivity(project, topRecipe.activity));
+    const topMultiplier = materialMultiplier(topRecipe.activity, topRecipe.bpTypeID, locationForActivity(project, topRecipe.activity), topRecipe.productTypeID);
     for (const inp of topRecipe.inputs) {
       const childQty = adjustedInputQty(inp.qty, topCycles, topMultiplier);
       walk(inp.typeID, childQty, inp.name, topRecipe.activity);
@@ -9023,7 +9067,7 @@ function aggregateProjectShoppingList(project) {
     // Legacy fallback: walk the hardcoded project.materials list via RECIPES
     const productRecipe = getRecipe(project.product?.typeID);
     const topMultiplier = productRecipe
-      ? materialMultiplier('manufacturing', productRecipe.bpTypeID, project.manufactureLocation)
+      ? materialMultiplier('manufacturing', productRecipe.bpTypeID, project.manufactureLocation, productRecipe.productTypeID)
       : (LOCATIONS[project.manufactureLocation]?.mfgMat ?? 1.0);
     for (const m of project.materials) {
       const topQty = adjustedInputQty(m.qty, project.runs, topMultiplier);
