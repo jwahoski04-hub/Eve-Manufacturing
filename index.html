@@ -1062,6 +1062,76 @@
   .project-status.building { color: #4a90b8; }
   .project-status.building .project-status-dot { background: #4a90b8; box-shadow: 0 0 3px #4a90b8; }
 
+  /* ============== PROJECT DRAWER — 'More' panel below each card ==============
+     A subtle collapsible drawer attached to each project card. Collapsed by
+     default; click the header to expand. When expanded, shows clickable pills
+     that navigate to the Stations and Characters tabs. Per-project state
+     persists to localStorage so the drawer remembers its expansion. */
+  .project-drawer {
+    margin-top: -4px;  /* pull up to kiss the card above */
+    margin-bottom: 6px;
+    background: #030507;
+    border: 1px solid #1a2430;
+    border-top: none;  /* card above supplies the top edge */
+  }
+  .project-drawer-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: transparent;
+    border: none;
+    color: #7a8a95;
+    font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s, color 0.12s;
+  }
+  .project-drawer-toggle:hover {
+    background: rgba(200,160,104,0.05);
+    color: #c9a868;
+  }
+  .project-drawer.open .project-drawer-toggle {
+    color: #c9a868;
+    border-bottom: 1px solid #1a2430;
+  }
+  .project-drawer-chev {
+    font-size: 9px;
+    width: 10px;
+    text-align: center;
+  }
+  .project-drawer-label {
+    flex: 1;
+  }
+  .project-drawer-body {
+    padding: 6px 8px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .project-drawer-pill {
+    display: block;
+    width: 100%;
+    padding: 5px 8px;
+    background: rgba(200,160,104,0.05);
+    border: 1px solid rgba(200,160,104,0.2);
+    color: #c9a868;
+    font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.05em;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .project-drawer-pill:hover {
+    background: rgba(200,160,104,0.12);
+    border-color: #8a6030;
+    color: #e8c98a;
+  }
+
   .projects-footer {
     flex-shrink: 0;
     padding: 8px 12px;
@@ -6962,6 +7032,16 @@ let state = {
       return raw ? JSON.parse(raw) : {};
     } catch (e) { return {}; }
   })(),
+  // Per-project drawer expand state for the "⚙ More" panel at the bottom of
+  // each project card. Keyed by project.id → bool. Missing key = collapsed
+  // (default). Provides quick-jump pills to other tabs without cluttering
+  // the main card face. Persisted so it survives reloads.
+  projectCardExpanded: (() => {
+    try {
+      const raw = localStorage.getItem('eveIndustry.projectCardExpanded');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  })(),
   // Manually-added stations — structure IDs the user pasted via Industry Stations tab,
   // even though they have no assets there. These show up in the pickable station list.
   manualStations: (() => {
@@ -7051,6 +7131,12 @@ function saveProjectStations() {
 function saveManualStations() {
   try {
     localStorage.setItem('eveIndustry.manualStations', JSON.stringify(Array.from(state.manualStations)));
+  } catch (e) {}
+}
+// Persist per-project card drawer state to localStorage.
+function saveProjectCardExpanded() {
+  try {
+    localStorage.setItem('eveIndustry.projectCardExpanded', JSON.stringify(state.projectCardExpanded));
   } catch (e) {}
 }
 // Persist stationConfigs to localStorage. stationConfigs is a plain object
@@ -8071,6 +8157,8 @@ function renderMainApp() {
             // render with no station pills even when a station is set.
             const mfgLoc = locationForActivity(p, 'manufacturing');
             const rxnLoc = locationForActivity(p, 'composite_reaction');
+            // Drawer state — per-project, persisted. Absence = collapsed.
+            const drawerOpen = !!state.projectCardExpanded[p.id];
             return `
               <div class="project-card ${isActive ? 'active' : ''}" data-project-id="${p.id}">
                 <button type="button" class="project-delete-btn" data-delete-project="${escapeHtml(p.id)}" title="Delete this project">×</button>
@@ -8102,6 +8190,24 @@ function renderMainApp() {
                     <span style="font-size: 10px; color: #5b7280; font-family: 'IBM Plex Mono', monospace;">×${p.runs}</span>
                   </div>
                 </div>
+              </div>
+              <div class="project-drawer ${drawerOpen ? 'open' : ''}" data-project-drawer="${p.id}">
+                <button type="button" class="project-drawer-toggle"
+                        data-drawer-toggle="${escapeHtml(p.id)}"
+                        title="${drawerOpen ? 'Collapse settings' : 'Expand settings'}">
+                  <span class="project-drawer-chev">${drawerOpen ? '▾' : '▸'}</span>
+                  <span class="project-drawer-label">⚙ More</span>
+                </button>
+                ${drawerOpen ? `
+                  <div class="project-drawer-body">
+                    <button type="button" class="project-drawer-pill" data-right-tab="stations" title="Open Industry Stations tab">
+                      Industry Stations →
+                    </button>
+                    <button type="button" class="project-drawer-pill" data-right-tab="characters" title="Open Characters tab">
+                      Characters →
+                    </button>
+                  </div>
+                ` : ''}
               </div>
             `;
           }).join('')}
@@ -12238,6 +12344,11 @@ function bindHandlers(project) {
         delete state.projectStations[projID];
         try { localStorage.setItem('eveIndustry.projectStations', JSON.stringify(state.projectStations)); } catch (_) {}
       }
+      // 3b. Clean per-project drawer state — don't leave orphan entries.
+      if (state.projectCardExpanded[projID]) {
+        delete state.projectCardExpanded[projID];
+        saveProjectCardExpanded();
+      }
       // 4. Clean per-project type scope cache (if present)
       if (typeof PROJECT_TYPEID_CACHE !== 'undefined') PROJECT_TYPEID_CACHE.delete(victim);
       // 5. Clean project-loading flag (harmless if not present)
@@ -12248,6 +12359,22 @@ function bindHandlers(project) {
         state.activeProjectId = PROJECTS[0]?.id || null;
       }
       render();
+    });
+  });
+
+  // Project drawer toggle — flips per-project 'More' drawer state and persists.
+  // Uses stopPropagation so the click doesn't bubble to .project-card's
+  // activate-click handler (which would switch active project as a side
+  // effect). Renders via renderPreservingQuadScroll to avoid resetting the Q4
+  // scroll position when the user opens/closes the drawer while reviewing.
+  document.querySelectorAll('[data-drawer-toggle]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const projID = String(el.dataset.drawerToggle);
+      state.projectCardExpanded[projID] = !state.projectCardExpanded[projID];
+      saveProjectCardExpanded();
+      renderPreservingQuadScroll();
     });
   });
 
