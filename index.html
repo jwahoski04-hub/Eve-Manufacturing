@@ -6634,7 +6634,10 @@ function renderNewProjectModal() {
   const m = state.newProjectModal;
   const stations = getAvailableStations();
   const results = m.query && !m.catalogLoading ? typeCatalog.search(m.query, 12) : [];
-  const canCreate = !!m.selectedTypeID && m.runs > 0 && m.mfgStationID;
+  // Stations are OPTIONAL — both mfg and reactions can be left blank and
+  // assigned later via the Industry Stations panel. Only product + runs
+  // are required to create a project.
+  const canCreate = !!m.selectedTypeID && m.runs > 0;
 
   // Build station <option> list once (reused for both selects)
   const stationOptions = (selectedID) => [
@@ -6703,7 +6706,7 @@ function renderNewProjectModal() {
           </div>
 
           <div class="np-field">
-            <label class="np-label">Manufacturing Station</label>
+            <label class="np-label">Manufacturing Station <span style="color:#5b7280; text-transform:none; letter-spacing:0;">(optional — assign later)</span></label>
             <select id="np-mfg-select" class="np-select">
               ${stationOptions(m.mfgStationID)}
             </select>
@@ -10313,7 +10316,8 @@ function wireNewProjectModalHandlers() {
   document.querySelectorAll('[data-np-create]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const m = state.newProjectModal;
-      if (!m.selectedTypeID || !m.mfgStationID || m.runs < 1) return;
+      // Stations are OPTIONAL now — only product + runs are required.
+      if (!m.selectedTypeID || m.runs < 1) return;
 
       // Build a fresh project. Only the fields the live resolver architecture
       // needs — no hardcoded materials or availableBpTypeIDs. The resolver
@@ -10331,8 +10335,13 @@ function wireNewProjectModalHandlers() {
           productQty: 1,
           baseTime: 0,
         },
-        manufactureLocation: m.mfgStationID,
-        reactionLocation: m.reactionStationID || m.mfgStationID,
+        // Stations may be null — user can assign later in Industry Stations.
+        // locationForActivity() + materialMultiplier() both treat null gracefully
+        // (no structure/ME bonus applied, recipes still resolve normally).
+        manufactureLocation: m.mfgStationID || null,
+        // Reactions mirror mfg if mfg was picked but reactions wasn't — matches
+        // prior behavior. If both are blank, leave reactions null too.
+        reactionLocation: m.reactionStationID || m.mfgStationID || null,
         runs: m.runs,
         topProductTypeID: m.selectedTypeID,
         // Legacy fields used by older code paths. Empty = resolver-driven.
