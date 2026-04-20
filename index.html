@@ -1092,7 +1092,7 @@
   }
   .np-panel {
     width: 520px; max-width: 92vw;
-    max-height: 84vh; overflow: hidden;
+    max-height: 84vh;
     background: #0a0f13;
     border: 1px solid #3a5060;
     box-shadow: 0 0 0 1px rgba(215,158,60,0.08), 0 20px 60px rgba(0,0,0,0.6);
@@ -1161,8 +1161,9 @@
   .np-dropdown {
     position: absolute;
     left: 0; right: 0; top: 100%;
-    max-height: 240px;
+    max-height: 340px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     background: #050709;
     border: 1px solid #3a5060;
     border-top: none;
@@ -5900,12 +5901,17 @@ const typeCatalog = (() => {
   }
 
   // Return up to N entries whose name contains the query (case-insensitive)
-  // AND that pass the manufacturable filter. Ranks exact-prefix matches
-  // first, then prefix, then substring.
+  // AND that pass the manufacturable filter. Ranking tiers:
+  //   1. Exact name match (highest)  — "Loki" hits the ship Loki, not subsystems
+  //   2. Word-start match             — query matches the start of a word within the name
+  //   3. Prefix match (whole name starts with query)
+  //   4. Substring match anywhere
   function search(query, limit = 15) {
     if (!entries) return [];
     const q = query.trim().toLowerCase();
     if (!q) return [];
+    const exact = [];
+    const wordStart = [];
     const prefix = [];
     const contains = [];
     for (const e of entries) {
@@ -5919,15 +5925,31 @@ const typeCatalog = (() => {
       if (isBlueprintName(e.name)) continue;
       if (isSkinName(e.name)) continue;
 
+      if (e.nameLower === q) {
+        exact.push(e);
+        continue;
+      }
+      if (e.nameLower.startsWith(q)) {
+        prefix.push(e);
+        continue;
+      }
+      // Word-start: query matches the start of a non-first word (e.g. query
+      // "raven" matches "Caldari Navy Raven" as a word-start). Detect by
+      // looking for " q" (space + query) in the lowercased name.
+      if (e.nameLower.includes(' ' + q)) {
+        wordStart.push(e);
+        continue;
+      }
       const idx = e.nameLower.indexOf(q);
-      if (idx === 0) prefix.push(e);
-      else if (idx > 0) contains.push(e);
-      if (prefix.length + contains.length >= limit * 3) break;
+      if (idx > 0) contains.push(e);
+      if (exact.length + prefix.length + wordStart.length + contains.length >= limit * 3) break;
     }
-    // Sort each bucket alphabetically, concat, slice
+    // Sort each tier alphabetically, concat in priority order, slice
+    exact.sort((a, b) => a.name.localeCompare(b.name));
     prefix.sort((a, b) => a.name.localeCompare(b.name));
+    wordStart.sort((a, b) => a.name.localeCompare(b.name));
     contains.sort((a, b) => a.name.localeCompare(b.name));
-    return [...prefix, ...contains].slice(0, limit);
+    return [...exact, ...prefix, ...wordStart, ...contains].slice(0, limit);
   }
 
   function getById(typeID) {
