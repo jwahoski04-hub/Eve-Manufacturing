@@ -6207,7 +6207,41 @@ async function ensureProjectRecipes(project) {
   const needsMaterialsPopulate = project.__user
     && Array.isArray(project.materials)
     && project.materials.length === 0;
-  if (recipeResolver.getCachedByProduct(seedTypeID) && !needsMaterialsPopulate) return;
+  const recipeCached = !!recipeResolver.getCachedByProduct(seedTypeID);
+
+  // Type-cache warming — separate from recipe caching. The rig bonus lookup
+  // (effectiveMfgBonus) needs each product's group_id to classify it against
+  // fitted rigs. group_id lives in the EVERef /types/{id} response, which is
+  // only fetched as a side-effect of prefetchFromSeed. If a project's recipes
+  // were cached in an earlier session (or pre-rig-support), the recipe cache
+  // can be populated while the type cache is missing entries.
+  //
+  // We always make sure the TOP product's type is cached, even when the
+  // recipe short-circuits below. This is cheap (one HTTP call at worst) and
+  // guarantees productRigCategory works for the project's root item. Inputs
+  // get their types populated when prefetchFromSeed runs below (or, if the
+  // recipe cache is warm, they were populated in an earlier session as part
+  // of that same prefetch).
+  if (!recipeResolver._typeCache()[seedTypeID]) {
+    try {
+      await fetch(`https://ref-data.everef.net/types/${seedTypeID}`, {
+        headers: { 'Accept': 'application/json' },
+      }).then(r => r.ok ? r.json() : null).then(json => {
+        if (json) {
+          recipeResolver._typeCache()[seedTypeID] = json;
+          // Persist so future sessions benefit from the warmed entry.
+          try {
+            localStorage.setItem(
+              'eveIndustry.everefTypes.v1',
+              JSON.stringify(recipeResolver._typeCache())
+            );
+          } catch (e) { /* storage full — non-fatal */ }
+        }
+      });
+    } catch (e) { /* network issue — effectiveMfgBonus will fall back to 1.0 */ }
+  }
+
+  if (recipeCached && !needsMaterialsPopulate) return;
 
   // Mark loading (new Set so React-style equality triggers re-render)
   state = { ...state, projectLoading: new Set([...state.projectLoading, project.id]) };
