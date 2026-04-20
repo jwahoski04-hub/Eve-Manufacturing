@@ -5338,6 +5338,90 @@ const RIG_CATALOG = {
     basePercent: -2.4, categories: ['hybridReaction'], tier: 2,
     fits: ['athanor', 'tatara'],
   },
+
+  // ═════════════════════════════════════════════════════════════════════
+  // XL-SET GENERALIZED MANUFACTURING RIGS (Sotiyo-only)
+  // ═════════════════════════════════════════════════════════════════════
+  // Sotiyos fit a DIFFERENT RIG SIZE than Raitaru/Azbel — they accept
+  // "XL-Set" rigs instead of (or in addition to) "M-Set" rigs. The XL
+  // variants are GENERALIZED: one rig covers a whole activity instead of
+  // one size class. This is the CCP design choice that rewards building
+  // large capital-capable structures.
+  //
+  // CRITICAL: These rigs use the SAME security multiplier curve as M-Set
+  // manufacturing rigs (hisec 1.0×, lowsec 1.9×, null 2.1×, WH 1.9× / 2.6×).
+  // basePercent values match the standard manufacturing schema.
+  //
+  // Sources: EVERef type pages 37180/37181 (Ship), 37178/37179 (Equipment),
+  // 37182/37183 (Structure and Component — verified via EVERef market group).
+  //
+  // What this unlocks for your workflow: your 3-F Sotiyo in-game shows every
+  // ship size (small, medium, large, capital, all T2 variants) at -4.2%
+  // material. That's the XL Ship ME I rig at null (base -2% × 2.1 = -4.2%).
+  // A single XL rig covers what would have needed four M rigs — except
+  // capital ships which M rigs don't cover at all.
+
+  // ─── XL Ship Manufacturing ME ────────────────────────────────────────
+  // Affects EVERY ship group: small/medium/large/capital, T1 and T2.
+  // This is the single most impactful rig for ship producers.
+  'rig_xlshipme_1': {
+    id: 'rig_xlshipme_1', typeId: 37180, name: 'XL Ship Manufacturing Efficiency I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, tier: 1,
+    categories: [
+      'smallShip', 'mediumShip', 'largeShip', 'capitalShip',
+      'advancedSmallShip', 'advancedMediumShip', 'advancedLargeShip',
+    ],
+    fits: ['sotiyo'],
+  },
+  'rig_xlshipme_2': {
+    id: 'rig_xlshipme_2', typeId: 37181, name: 'XL Ship Manufacturing Efficiency II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, tier: 2,
+    categories: [
+      'smallShip', 'mediumShip', 'largeShip', 'capitalShip',
+      'advancedSmallShip', 'advancedMediumShip', 'advancedLargeShip',
+    ],
+    fits: ['sotiyo'],
+  },
+
+  // ─── XL Equipment & Consumable Manufacturing ME ──────────────────────
+  // Affects modules, ship rigs, personal deployables, implants, containers.
+  // We map this to our 'equipment' bucket since it targets the same broad
+  // category our existing Equipment ME M-Set rig does.
+  'rig_xlequipme_1': {
+    id: 'rig_xlequipme_1', typeId: 37178, name: 'XL Equipment Manufacturing Efficiency I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, tier: 1,
+    categories: ['equipment'],
+    fits: ['sotiyo'],
+  },
+  'rig_xlequipme_2': {
+    id: 'rig_xlequipme_2', typeId: 37179, name: 'XL Equipment Manufacturing Efficiency II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, tier: 2,
+    categories: ['equipment'],
+    fits: ['sotiyo'],
+  },
+
+  // ─── XL Structure & Component Manufacturing ME ──────────────────────
+  // Affects components (T1 + T2), Upwell structures, structure modules,
+  // structure rigs, starbase structures, fuel blocks. We map to both
+  // 'component' and 'advancedComponent' buckets since it covers both.
+  'rig_xlstructme_1': {
+    id: 'rig_xlstructme_1', typeId: 37182, name: 'XL Structure & Component ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, tier: 1,
+    categories: ['component', 'advancedComponent'],
+    fits: ['sotiyo'],
+  },
+  'rig_xlstructme_2': {
+    id: 'rig_xlstructme_2', typeId: 37183, name: 'XL Structure & Component ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, tier: 2,
+    categories: ['component', 'advancedComponent'],
+    fits: ['sotiyo'],
+  },
 };
 
 // Product category classifier — maps an EVE typeID (via its groupId) to
@@ -5713,6 +5797,12 @@ function getRigFamilies(structureType) {
   // Families not in this list come at the end in alphabetical order (future-proofing
   // for when Phase 2 adds reaction/TE/research rigs).
   const FAMILY_ORDER = [
+    // XL-Set (Sotiyo) — generalized, most impactful. Listed first so they
+    // surface at the top of Sotiyo's rig dropdown.
+    'XL Ship Manufacturing Efficiency',
+    'XL Equipment Manufacturing Efficiency',
+    'XL Structure & Component ME',
+    // M-Set (all engineering complexes) — size-specific basic rigs
     'Basic Small Ship ME',
     'Basic Medium Ship ME',
     'Basic Large Ship ME',
@@ -5724,6 +5814,10 @@ function getRigFamilies(structureType) {
     'Advanced Components ME',
     'Equipment ME',
     'Ammunition ME',
+    // Reaction rigs (Athanor/Tatara)
+    'Composite Reactor ME',
+    'Biochemical Reactor ME',
+    'Hybrid Reactor ME',
   ];
   const orderIndex = (name) => {
     const i = FAMILY_ORDER.indexOf(name);
