@@ -10024,13 +10024,17 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
     const bpLoc = project ? locationForActivity(project, recipe.activity) : null;
     const bpStat = bpcStatus(recipe.bpTypeID, cycles, bpLoc, recipe.activity);
 
-    // Shortfall info — only populated when we're in the "at destination but
-    // short" branch. Drives three things: main label text, row border color
-    // (warn vs missing), and the optional hint line. Null for all other
-    // cases (none owned, bpoOnly, elsewhere-only, covered, bpo/unlimited).
+    // Shortfall info — populated for any owned-but-short case. Two distinct
+    // branches feed this:
+    //   (a) 'at destination but short' — local BPCs exist, just not enough
+    //   (b) 'BPCs elsewhere only'      — zero local stock, all in other stations
+    // Both need the same rich UI treatment: clear NEED count + elsewhere hint.
+    // Previously only branch (a) used bpcShortfallHint, leaving branch (b)
+    // with just a bare 'AT K7D-II' pill that hid the shortfall math entirely.
     const isShortAtLoc = bpStat.owned && bpStat.atLocation
       && bpStat.shortfall > 0 && !bpStat.bpoOnly;
-    const shortfallInfo = isShortAtLoc
+    const isElsewhereOnly = bpStat.owned && !bpStat.atLocation && !bpStat.bpoOnly;
+    const shortfallInfo = (isShortAtLoc || isElsewhereOnly)
       ? bpcShortfallHint(bpStat, recipe.bpTypeID, bpLoc)
       : null;
 
@@ -10041,9 +10045,8 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
     // is reflected in the row border and label color.
     const bpRowCls = !bpStat.owned ? 'missing'
       : (bpStat.bpoOnly && bpStat.shortfall > 0) ? 'missing'
-      : (!bpStat.atLocation ? 'elsewhere'
-        : shortfallInfo ? shortfallInfo.rowState
-          : 'ok');
+      : shortfallInfo ? shortfallInfo.rowState
+        : 'ok';
     const isReaction = recipe.activity !== 'manufacturing';
     let bpStatusLabel;
     if (!bpStat.owned) {
@@ -10053,11 +10056,10 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
       // Short label keeps the row layout clean; the detailed per-location story
       // is visible in Q4 Market & Costs.
       bpStatusLabel = `BPO · RUNS NEEDED`;
-    } else if (!bpStat.atLocation) {
-      bpStatusLabel = `AT ${locSystem(bpStat.elsewhereLocationID).toUpperCase()}`;
     } else if (shortfallInfo) {
-      // Short at destination — helper gives us a comma-formatted label that
-      // drops the old confusing "+NNNN" prefix. Optional hint rendered below.
+      // Short — either at-destination or elsewhere-only. The helper produces
+      // a comma-formatted "NEED N RUNS" label in both cases; the hint line
+      // below differentiates where the existing stock lives.
       bpStatusLabel = shortfallInfo.label;
     } else if (bpStat.isBpo) {
       // Unlimited runs. For reactions (which are formulas, not BPOs), show
@@ -10092,7 +10094,7 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
           ${bpElsewhereHint}
         </div>
         <div class="q2-tree-qty">
-          <span class="bp-cycles">${fmtFull(cycles)} cycle${cycles !== 1 ? 's' : ''}</span>
+          <span class="bp-cycles">${fmtFull(cycles)} run${cycles !== 1 ? 's' : ''}</span>
         </div>
       </div>
     `;
@@ -10139,7 +10141,7 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
           </div>
           <div class="q2-tree-name">
             ${recipe.fuel.name}
-            <span class="fuel-label">FUEL · ${cycles} cycle${cycles !== 1 ? 's' : ''}</span>
+            <span class="fuel-label">FUEL · ${cycles} run${cycles !== 1 ? 's' : ''}</span>
           </div>
           <div class="q2-tree-qty">
             ${fuelQty}
