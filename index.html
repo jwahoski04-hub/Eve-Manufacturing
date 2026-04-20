@@ -1643,7 +1643,7 @@
     padding: 4px 8px;
     background: rgba(200,160,104,0.04);
     border: 1px solid rgba(200,160,104,0.2);
-    border-left: 3px solid #c8a068;
+    border-left: 5px solid #c8a068;
     margin-bottom: 2px;
   }
   .q2-bp-row.ok { border-left-color: #5a8f3a; background: rgba(108,192,74,0.04); }
@@ -3272,7 +3272,7 @@
     color: #8ba4b3;
     font-family: 'IBM Plex Mono', monospace;
     background: rgba(108,192,74,0.04);
-    border-left: 3px solid rgba(108,192,74,0.3);
+    border-left: 5px solid rgba(108,192,74,0.3);
   }
   .q2-leaf-inline .source-label { color: #6cc04a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-right: 6px; }
 
@@ -8064,6 +8064,13 @@ function renderMainApp() {
             const isActive = p.id === state.activeProjectId;
             const statusClass = allReady ? 'ready' : 'short';
             const statusText = allReady ? 'Ready' : `${ready}/${total}`;
+            // Resolve effective stations through locationForActivity so we
+            // pick up state.projectStations overrides as well as the legacy
+            // project.manufactureLocation / reactionLocation fields. Without
+            // this, projects created via the newer station-override flow
+            // render with no station pills even when a station is set.
+            const mfgLoc = locationForActivity(p, 'manufacturing');
+            const rxnLoc = locationForActivity(p, 'composite_reaction');
             return `
               <div class="project-card ${isActive ? 'active' : ''}" data-project-id="${p.id}">
                 <button type="button" class="project-delete-btn" data-delete-project="${escapeHtml(p.id)}" title="Delete this project">×</button>
@@ -8076,14 +8083,14 @@ function renderMainApp() {
                     ${(p.product.race || p.product.group) ? `
                       <div class="project-meta">${[p.product.race, p.product.group].filter(Boolean).join(' · ')}</div>
                     ` : ''}
-                    ${p.manufactureLocation ? `
+                    ${mfgLoc ? `
                       <div class="project-loc">
-                        <span class="project-loc-icon">🏗</span>${locShort(p.manufactureLocation)}
+                        <span class="project-loc-icon">🏗</span>${locShort(mfgLoc)}
                       </div>
                     ` : ''}
-                    ${p.reactionLocation && p.reactionLocation !== p.manufactureLocation ? `
+                    ${rxnLoc && rxnLoc !== mfgLoc ? `
                       <div class="project-loc">
-                        <span class="project-loc-icon">⚗</span>${locShort(p.reactionLocation)}
+                        <span class="project-loc-icon">⚗</span>${locShort(rxnLoc)}
                       </div>
                     ` : ''}
                   </div>
