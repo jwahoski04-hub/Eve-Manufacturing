@@ -2819,6 +2819,16 @@
     margin-top: 2px;
     letter-spacing: 0.02em;
   }
+  /* BPC shortfall variants — used when a BP row has elsewhere stock.
+     .covers  → elsewhere inventory fully covers the shortfall (logistics,
+                amber). Same color as base hint but kept as an explicit
+                variant for clarity.
+     .partial → elsewhere falls short too (true sourcing problem, red).
+                The whole row also switches to the missing border so the
+                red-on-amber-hint combo signals "can't transfer your way
+                out of this one." */
+  .q2-elsewhere-hint.covers  { color: #c9a868; }
+  .q2-elsewhere-hint.partial { color: #d88686; }
 
   /* ===== Job pills ===== */
   .q2-pills {
@@ -7057,6 +7067,73 @@ function bpcStatus(bpTypeID, cyclesNeeded, relevantLocationID, activity) {
   };
 }
 
+// ---------------------------------------------------------------------
+// BPC shortfall presentation helper
+// ---------------------------------------------------------------------
+// Given a bpcStatus result that's flagged short at the destination
+// (atLocation=true, shortfall>0, not bpoOnly), compute what the UI should
+// show. This is the single source of truth used by BOTH render sites —
+// the Q2 tree row and the Q4 shopping list — so their labels stay in sync.
+//
+// Three outputs:
+//   label       — the main status pill text, e.g. "NEED 2,006 RUNS"
+//   hint        — the secondary line, e.g. "+11,820 runs elsewhere · K7D-II +1"
+//                 ('' when there's no elsewhere stock at all — nothing useful
+//                 to say beyond the main label in that case)
+//   hintClass   — 'covers' (amber) if elsewhere >= shortfall, else 'partial'
+//                 (red). The calling render site toggles row border between
+//                 warn (amber) and missing (red) on this same distinction.
+//   rowState    — 'warn' | 'missing'. Mirrors hintClass so callers don't
+//                 have to re-derive it. 'missing' means elsewhere can't
+//                 close the gap — the user needs to acquire more BPCs,
+//                 not just haul.
+//
+// bpTypeID is needed so we can count how many distinct elsewhere locations
+// exist (to render the "+N others" suffix when there are multiple).
+function bpcShortfallHint(bpStat, bpTypeID, relevantLocationID) {
+  const short = bpStat.shortfall;
+  const els   = bpStat.elsewhere || 0;
+  const covers = els >= short;
+
+  // Main label — ditches the old "+NNNN" prefix in favor of a clear,
+  // comma-formatted shortfall. Reads as "need N more runs", never as "surplus".
+  const label = `NEED ${fmtFull(short)} RUN${short !== 1 ? 'S' : ''}`;
+
+  // Row / hint color state — amber when transfer solves it, red when not.
+  const rowState  = covers ? 'warn' : 'missing';
+  const hintClass = covers ? 'covers' : 'partial';
+
+  // Zero elsewhere — keep the UI calm, skip the hint entirely. The main
+  // label already says NEED N RUNS; there's no supplementary info to give.
+  if (els === 0) {
+    return { label, hint: '', hintClass, rowState };
+  }
+
+  // Count distinct elsewhere locations so we can render "K7D-II +2 others"
+  // rather than only naming the top bucket. Uses bpcsElsewhere (the same
+  // helper bpcStatus uses internally) so the count is consistent.
+  const elsewhereBuckets = bpcsElsewhere(bpTypeID, relevantLocationID);
+  const distinctLocs = new Set(elsewhereBuckets.map(b => b.locationID));
+  const otherCount = Math.max(0, distinctLocs.size - 1);
+  const primaryLoc = bpStat.elsewhereLocationID;
+  const primaryLocLabel = primaryLoc ? locSystem(primaryLoc) : 'elsewhere';
+  const otherSuffix = otherCount > 0 ? ` +${otherCount}` : '';
+
+  // Two phrasings depending on whether elsewhere covers the shortfall:
+  //   covers=true  → just show the surplus. User's action is "haul it."
+  //   covers=false → show what's available AND the remaining shortfall so
+  //                  the user sees the acquire-vs-haul split at a glance.
+  let hint;
+  if (covers) {
+    hint = `+${fmtFull(els)} runs elsewhere · ${primaryLocLabel}${otherSuffix}`;
+  } else {
+    const stillShort = short - els;
+    hint = `+${fmtFull(els)} runs at ${primaryLocLabel}${otherSuffix} — still short ${fmtFull(stillShort)}`;
+  }
+
+  return { label, hint, hintClass, rowState };
+}
+
 // =====================================================================
 // RECIPE RESOLVER — next-gen live recipe fetcher from EVERef
 // =====================================================================
@@ -8148,12 +8225,27 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
     // BPC's relevant location is where THIS recipe runs (not the parent's consumingActivity)
     const bpLoc = project ? locationForActivity(project, recipe.activity) : null;
     const bpStat = bpcStatus(recipe.bpTypeID, cycles, bpLoc, recipe.activity);
+
+    // Shortfall info — only populated when we're in the "at destination but
+    // short" branch. Drives three things: main label text, row border color
+    // (warn vs missing), and the optional hint line. Null for all other
+    // cases (none owned, bpoOnly, elsewhere-only, covered, bpo/unlimited).
+    const isShortAtLoc = bpStat.owned && bpStat.atLocation
+      && bpStat.shortfall > 0 && !bpStat.bpoOnly;
+    const shortfallInfo = isShortAtLoc
+      ? bpcShortfallHint(bpStat, recipe.bpTypeID, bpLoc)
+      : null;
+
     // bpoOnly (manufacturing BPO with no BPCs) is treated as RED because BPC
     // runs are genuinely short — a BPO alone can't satisfy parallel-job demand.
+    // For the shortfall-at-destination case we now defer to shortfallInfo.rowState
+    // so amber ("covered by elsewhere") vs red ("still short after transfers")
+    // is reflected in the row border and label color.
     const bpRowCls = !bpStat.owned ? 'missing'
       : (bpStat.bpoOnly && bpStat.shortfall > 0) ? 'missing'
       : (!bpStat.atLocation ? 'elsewhere'
-        : bpStat.shortfall > 0 ? 'warn' : 'ok');
+        : shortfallInfo ? shortfallInfo.rowState
+          : 'ok');
     const isReaction = recipe.activity !== 'manufacturing';
     let bpStatusLabel;
     if (!bpStat.owned) {
@@ -8165,8 +8257,10 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
       bpStatusLabel = `BPO · RUNS NEEDED`;
     } else if (!bpStat.atLocation) {
       bpStatusLabel = `AT ${locSystem(bpStat.elsewhereLocationID).toUpperCase()}`;
-    } else if (bpStat.shortfall > 0) {
-      bpStatusLabel = `NEED +${bpStat.shortfall} RUN${bpStat.shortfall !== 1 ? 'S' : ''}`;
+    } else if (shortfallInfo) {
+      // Short at destination — helper gives us a comma-formatted label that
+      // drops the old confusing "+NNNN" prefix. Optional hint rendered below.
+      bpStatusLabel = shortfallInfo.label;
     } else if (bpStat.isBpo) {
       // Unlimited runs. For reactions (which are formulas, not BPOs), show
       // "FORMULA" instead of "BPO" to match how the player thinks about them.
@@ -8179,6 +8273,14 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
       ? `<span class="bp-tuning">ME ${bpStat.me} · TE ${bpStat.te}</span>`
       : '';
 
+    // Elsewhere hint — second line under the BP name, dim amber (covers case)
+    // or dim red (still-short case). Only rendered when shortfallInfo exists
+    // AND the helper actually produced a hint string (it returns '' when
+    // there's zero elsewhere stock to report).
+    const bpElsewhereHint = shortfallInfo && shortfallInfo.hint
+      ? `<div class="q2-elsewhere-hint ${shortfallInfo.hintClass}">${shortfallInfo.hint}</div>`
+      : '';
+
     childrenHtml += `
       <div class="q2-bp-row ${bpRowCls}" style="padding-left: ${childIndent}px;">
         <div class="q2-tree-chev leaf-marker">◈</div>
@@ -8189,6 +8291,7 @@ function renderTreeNode(typeID, name, totalNeeded, pathKey, depth, isRoot, consu
           ${recipe.bpName}
           <span class="bp-label ${bpRowCls}">${bpStatusLabel}</span>
           ${bpTuning}
+          ${bpElsewhereHint}
         </div>
         <div class="q2-tree-qty">
           <span class="bp-cycles">${fmtFull(cycles)} cycle${cycles !== 1 ? 's' : ''}</span>
@@ -8632,10 +8735,27 @@ function renderBlueprintSection(blueprints, project) {
         const bpLoc = project ? locationForActivity(project, b.activity) : null;
         const stat = bpcStatus(b.typeID, b.cyclesNeeded, bpLoc, b.activity);
         const isReaction = b.activity !== 'manufacturing';
+
+        // Shortfall info — same helper as the tree row, so the label and
+        // hint stay identical across views. Null when this row isn't in
+        // the short-at-destination state.
+        const isShortAtLoc = stat.owned && stat.atLocation
+          && stat.shortfall > 0 && !stat.bpoOnly;
+        const shortfallInfo = isShortAtLoc
+          ? bpcShortfallHint(stat, b.typeID, bpLoc)
+          : null;
+
+        // Row border class. This block uses 'short' as its amber variant
+        // (not 'warn' like the tree), so map rowState accordingly:
+        //   helper 'warn'    → 'short'   (amber — transfer covers it)
+        //   helper 'missing' → 'missing' (red — need to acquire more)
+        const shortfallRowCls = shortfallInfo
+          ? (shortfallInfo.rowState === 'missing' ? 'missing' : 'short')
+          : 'ready';
         const rowCls = !stat.owned ? 'missing'
           : (stat.bpoOnly && stat.shortfall > 0) ? 'missing'
           : (!stat.atLocation ? 'elsewhere'
-            : stat.shortfall > 0 ? 'short' : 'ready');
+            : stat.shortfall > 0 ? shortfallRowCls : 'ready');
         const actLabel = ({
           manufacturing: 'Blueprint', composite_reaction: 'Reaction Formula', advanced_reaction: 'Reaction Formula',
         })[b.activity] || 'Blueprint';
@@ -8650,17 +8770,32 @@ function renderBlueprintSection(blueprints, project) {
           statusLabel = `BPO · RUNS NEEDED`;
         } else if (!stat.atLocation) {
           statusLabel = `AT ${locSystem(stat.elsewhereLocationID).toUpperCase()}`;
-        } else if (stat.shortfall > 0) {
-          statusLabel = `NEED +${stat.shortfall}`;
+        } else if (shortfallInfo) {
+          // Shared helper — comma-formatted, no confusing '+' prefix.
+          statusLabel = shortfallInfo.label;
         } else if (stat.isBpo) {
           statusLabel = isReaction ? `FORMULA · UNLIMITED` : `BPO · UNLIMITED`;
         } else {
           statusLabel = `${fmtFull(stat.runsRemaining)} RUNS`;
         }
+        // Status-cell text class. For shortfall-at-destination we map the
+        // helper's state to the CSS classes this block already uses:
+        //   missing → missing (red text), partial → partial (amber text).
+        const shortfallStatusCls = shortfallInfo
+          ? (shortfallInfo.rowState === 'missing' ? 'missing' : 'partial')
+          : 'partial';
         const statusCls = !stat.owned ? 'missing'
           : (stat.bpoOnly && stat.shortfall > 0) ? 'missing'
           : (!stat.atLocation ? 'partial'
-            : stat.shortfall > 0 ? 'partial' : 'have');
+            : stat.shortfall > 0 ? shortfallStatusCls : 'have');
+
+        // Second-line hint. Flat grid layout, so the hint sits under the
+        // main status number inside the STATUS cell. Same helper output as
+        // the tree row — just different placement.
+        const statusHint = shortfallInfo && shortfallInfo.hint
+          ? `<div class="q2-elsewhere-hint ${shortfallInfo.hintClass}" style="text-align: center; margin-top: 2px;">${shortfallInfo.hint}</div>`
+          : '';
+
         return `
           <div class="q2-shop-row-bp ${rowCls}">
             <div class="q2-tree-icon">
@@ -8682,7 +8817,7 @@ function renderBlueprintSection(blueprints, project) {
             </div>
             <div class="q2-shop-col">
               <div class="q2-shop-label">STATUS</div>
-              <div class="q2-shop-val"><span class="${statusCls}">${statusLabel}</span></div>
+              <div class="q2-shop-val"><span class="${statusCls}">${statusLabel}</span>${statusHint}</div>
             </div>
           </div>
         `;
