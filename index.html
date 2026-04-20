@@ -4713,16 +4713,20 @@ const STRUCTURE_TYPES = {
 //   Panther at Azbel+this rig: 0.99 × (1 - 0.0504) = 0.9401 combined
 const RIG_CATALOG = {
   // ─── Basic Small Ship ME ─────────────────────────────────────────────
+  // 'Basic [Size] Ship' rigs in EVE apply to ALL ships of that size class,
+  // regardless of tech level. A T2 assault frigate benefits from a Basic
+  // Small Ship ME rig AND, if fitted, additionally from an Advanced Small
+  // Ship ME rig (which is T2-only). Both rigs stack multiplicatively.
   'rig_bssme_1': {
     id: 'rig_bssme_1', typeId: 37155, name: 'Basic Small Ship ME I',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.0, categories: ['smallShip'], tier: 1,
+    basePercent: -2.0, categories: ['smallShip', 'advancedSmallShip'], tier: 1,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
   'rig_bssme_2': {
     id: 'rig_bssme_2', typeId: 37156, name: 'Basic Small Ship ME II',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.4, categories: ['smallShip'], tier: 2,
+    basePercent: -2.4, categories: ['smallShip', 'advancedSmallShip'], tier: 2,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
 
@@ -4730,33 +4734,38 @@ const RIG_CATALOG = {
   'rig_bmsme_1': {
     id: 'rig_bmsme_1', typeId: 37157, name: 'Basic Medium Ship ME I',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.0, categories: ['mediumShip'], tier: 1,
+    basePercent: -2.0, categories: ['mediumShip', 'advancedMediumShip'], tier: 1,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
   'rig_bmsme_2': {
     id: 'rig_bmsme_2', typeId: 37158, name: 'Basic Medium Ship ME II',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.4, categories: ['mediumShip'], tier: 2,
+    basePercent: -2.4, categories: ['mediumShip', 'advancedMediumShip'], tier: 2,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
 
   // ─── Basic Large Ship ME ─────────────────────────────────────────────
-  // This is the rig family that affects your Panther (Black Ops battleship
-  // is a large ship). W-IX39's T2 variant gives -2.4% × 2.1 = -5.04% in null.
+  // This is the rig family that affects your Panther (Black Ops battleship).
+  // A T1 rig in null gives -2.0% × 2.1 = -4.2% — exactly matching what
+  // Sakura shows in-game.
   'rig_blsme_1': {
     id: 'rig_blsme_1', typeId: 37159, name: 'Basic Large Ship ME I',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.0, categories: ['largeShip'], tier: 1,
+    basePercent: -2.0, categories: ['largeShip', 'advancedLargeShip'], tier: 1,
     fits: ['azbel', 'sotiyo'],
   },
   'rig_blsme_2': {
     id: 'rig_blsme_2', typeId: 37160, name: 'Basic Large Ship ME II',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.4, categories: ['largeShip'], tier: 2,
+    basePercent: -2.4, categories: ['largeShip', 'advancedLargeShip'], tier: 2,
     fits: ['azbel', 'sotiyo'],
   },
 
   // ─── Capital Ship ME (Sotiyo only) ───────────────────────────────────
+  // Capital rigs cover carriers, dreadnoughts, supercarriers, titans, and
+  // capital industrial ships. EVE does NOT currently split 'basic' vs
+  // 'advanced' for capitals — there's just one capital ME rig family, and
+  // it applies to all capital classes. (This differs from sub-capitals.)
   'rig_capsme_1': {
     id: 'rig_capsme_1', typeId: 43865, name: 'Capital Ship ME I',
     activity: 'manufacturing', bonusType: 'material',
@@ -4817,18 +4826,19 @@ const RIG_CATALOG = {
   },
 
   // ─── Components ──────────────────────────────────────────────────────
-  // Basic Components rig — for T1 component manufacturing (Construction
-  // Components, Fernite Carbide plates, etc.). Distinct from ship rigs.
+  // Basic Components rig covers BOTH T1 and T2 components (same inclusive
+  // model as Basic Ship rigs). Advanced Components rig is T2-only and
+  // stacks on top of Basic when both are fitted.
   'rig_cme_1': {
     id: 'rig_cme_1', typeId: 37154, name: 'Basic Components ME I',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.0, categories: ['component'], tier: 1,
+    basePercent: -2.0, categories: ['component', 'advancedComponent'], tier: 1,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
   'rig_cme_2': {
     id: 'rig_cme_2', typeId: 43860, name: 'Basic Components ME II',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.4, categories: ['component'], tier: 2,
+    basePercent: -2.4, categories: ['component', 'advancedComponent'], tier: 2,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
 
@@ -4972,6 +4982,151 @@ const CATEGORY_FALLBACK = {
   //   PRODUCT_CATEGORY_MAP's group-level entries.
 };
 
+// =====================================================================
+// BONUS LOOKUP — effectiveMfgBonus(productTypeID, stationID)
+// =====================================================================
+// Computes the station-portion manufacturing material multiplier for a
+// given product at a given station. This is the "correct" way to derive
+// the mfg bonus — replaces the flat per-station `LOCATIONS[x].mfgMat` in
+// Increment 4. Increment 3 wires it as a sibling so the old and new math
+// can be compared side-by-side in the console.
+//
+// Returns: a MULTIPLIER in (0, 1]. E.g. 0.9401 means materials are reduced
+// to 94.01% of base. Returns 1.0 (neutral) for any unresolved case.
+//
+// The BP's ME bonus is NOT applied here — that's a blueprint property and
+// belongs in materialMultiplier. This function is purely station-side.
+//
+// Inputs the function draws on:
+//   - productTypeID         : typeID of the item being manufactured
+//   - stationID             : stationID key into state.stationConfigs
+//   - state.stationConfigs  : user-configured rig fits per station
+//   - STRUCTURE_TYPES       : structure role bonuses
+//   - RIG_CATALOG           : rig definitions with categories + basePercent
+//   - PRODUCT_CATEGORY_MAP  : groupId → rig category bucket
+//   - CATEGORY_FALLBACK     : categoryId → bucket (for modules/ammo/drones)
+//   - recipeResolver._typeCache()  : cached EVERef type data with group_id
+//
+// Fallbacks (in order):
+//   1. No stationID           → 1.0 (neutral — walker won't apply any bonus)
+//   2. No stationConfig entry → legacy flat LOCATIONS[x].mfgMat (back-compat)
+//   3. No structureType       → 1.0
+//   4. No product category    → structure role only (no rig bonuses)
+//   5. No matching rigs       → structure role only
+// =====================================================================
+
+// Security multiplier for rig bonuses. Rigs give small bonuses in hisec,
+// but those bonuses SCALE UP as the system gets more dangerous — that's
+// how CCP incentivizes industry in low/null/WH. Source: EVE online wiki.
+//
+// This is a function (not a const table) because wormhole classification
+// requires non-trivial logic and we haven't wired WH detection into the
+// station config yet. For non-WH systems, just security status drives it.
+function rigSecurityMultiplier(systemSecurity, isWormhole, wormholeClass) {
+  // Wormholes: C1-C3 use the lowsec multiplier, C4-C6 use the high-danger
+  // multiplier. If class is unknown but we know it's a wormhole, assume
+  // C1-C3 (the safer of the two — errs toward smaller bonuses, which is
+  // the more conservative choice when data is missing).
+  if (isWormhole) {
+    if (wormholeClass != null && wormholeClass >= 4) return 2.6;
+    return 1.9;
+  }
+  // K-space: hisec ≥0.5, lowsec 0.0–0.4, nullsec <0.0
+  if (systemSecurity == null) return 1.0;  // unknown → safe default
+  if (systemSecurity >= 0.45) return 1.0;  // hisec (≥0.5 rounded)
+  if (systemSecurity > 0.0)   return 1.9;  // lowsec
+  return 2.1;                              // nullsec (≤0.0)
+}
+
+// Resolve a product's rig category bucket from its typeID.
+// Checks groupId first (PRODUCT_CATEGORY_MAP) then falls back to categoryId
+// (CATEGORY_FALLBACK) if the group isn't explicitly listed. Returns null
+// if neither path resolves — caller treats null as "no rig applies".
+function productRigCategory(productTypeID) {
+  if (!productTypeID) return null;
+  // Try EVERef's cached type data for group_id
+  let typeInfo = null;
+  try {
+    const cache = recipeResolver._typeCache();
+    typeInfo = cache && cache[productTypeID];
+  } catch (e) { /* recipeResolver not yet init'd */ }
+  if (!typeInfo) return null;
+
+  // Group-level match (most specific — handles Black Ops vs Battleship etc.)
+  const groupId = typeInfo.group_id;
+  if (groupId != null && PRODUCT_CATEGORY_MAP[groupId]) {
+    return PRODUCT_CATEGORY_MAP[groupId];
+  }
+
+  // Category-level fallback for module/ammo/drone products where
+  // enumerating every group would be overkill. EVERef types have
+  // category_id on some responses, but it's inconsistent — check both
+  // direct and nested locations.
+  const catId = typeInfo.category_id ?? typeInfo.categoryID ?? null;
+  if (catId != null && CATEGORY_FALLBACK[catId]) {
+    return CATEGORY_FALLBACK[catId];
+  }
+  return null;
+}
+
+// Main entry point. See block comment above for full semantics.
+function effectiveMfgBonus(productTypeID, stationID) {
+  // (1) No station context → neutral. Walker won't apply any reduction.
+  if (!stationID) return 1.0;
+
+  const cfg = state.stationConfigs[stationID];
+  // (2) Station has no structured config → fall back to legacy flat mfgMat.
+  // This is what makes Increment 3 safe to ship: stations without rig data
+  // keep behaving exactly as they do today.
+  if (!cfg) {
+    return LOCATIONS[stationID]?.mfgMat ?? 1.0;
+  }
+
+  const struct = STRUCTURE_TYPES[cfg.structureType];
+  // (3) Config present but structureType is unknown → neutral. Shouldn't
+  // happen in practice (UI should only write valid keys) but guard anyway.
+  if (!struct) return 1.0;
+
+  // Structure role bonus — applies to everything manufactured here,
+  // regardless of rigs. E.g. Azbel = 0.99 (−1% material).
+  let multiplier = struct.mfgMaterial;
+
+  // If no rigs fitted, we're done.
+  const rigIds = cfg.rigSlots || [];
+  if (rigIds.length === 0) return multiplier;
+
+  // (4) Resolve product's rig category — if we can't, skip rig bonuses.
+  // (Structure role already applied above, so this still returns a sensible
+  // value for raw materials / unknown groups.)
+  const productCategory = productRigCategory(productTypeID);
+  if (!productCategory) return multiplier;
+
+  // (5) Apply each fitted rig whose categories include productCategory.
+  // Multiple matching rigs stack MULTIPLICATIVELY (not additively) — this
+  // matches CCP's in-game math. E.g. two -2% rigs = ×0.98 × 0.98, NOT ×0.96.
+  const secMult = rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+  for (const rigId of rigIds) {
+    const rig = RIG_CATALOG[rigId];
+    if (!rig) continue;                                  // unknown rig id
+    if (rig.activity !== 'manufacturing') continue;      // wrong activity
+    if (rig.bonusType !== 'material') continue;          // wrong bonus
+    if (!rig.categories.includes(productCategory)) continue;  // wrong bucket
+
+    // basePercent is negative (e.g. -2.4). Convert to multiplier via:
+    //   rigMult = 1 + (basePercent * secMult) / 100
+    // For -2.4% at 2.1× security: 1 + (-2.4 * 2.1)/100 = 1 - 0.0504 = 0.9496
+    const rigMult = 1 + (rig.basePercent * secMult) / 100;
+    multiplier *= rigMult;
+  }
+
+  return multiplier;
+}
+
+// Expose for browser-console testing during Increments 3-5. Remove or
+// keep after Increment 4 is validated — low cost to leave in, useful
+// if users report incorrect numbers and we need to debug.
+window.effectiveMfgBonus = effectiveMfgBonus;
+window.productRigCategory = productRigCategory;
 
 const LOCATIONS = {
   'loc-1dq':    { name: '1DQ1-A III - Moon 1 - Keepstar',                        shortName: '1DQ1 Keepstar', system: '1DQ1-A',  region: 'Delve',       security: -0.5, type: 'keepstar',    mfgMat: 0.99, reactionMat: 1.00 },
