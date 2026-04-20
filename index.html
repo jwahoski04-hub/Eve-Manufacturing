@@ -6875,13 +6875,41 @@ const priceCache = (() => {
   }
 
   // Collect the pricing payload: { typeID → name } for all unique typeIDs
-  // the caller wants to price. Uses typeCatalog to resolve names.
-  function resolveNames(typeIDs) {
-    const uniqueIds = Array.from(new Set(typeIDs.map(Number).filter(Boolean)));
+  // the caller wants to price. Accepts either:
+  //   - plain typeIDs: [34, 35, 36]
+  //   - {typeID, name} objects: [{typeID:34, name:'Tritanium'}, ...]
+  //
+  // Resolution order for each typeID:
+  //   1. Name supplied directly on the input item (if object form)
+  //   2. typeCatalog.getById — authoritative SDE names, if catalog loaded
+  //   3. nameLookup — recipe data + ESI + project materials + mineral fallback
+  // Using the directly-supplied name first means callers that already know
+  // the name (e.g. from the shopping-list aggregator) don't depend on the
+  // typeCatalog having been loaded yet. This avoids the "fetch before
+  // catalog ready" failure mode.
+  function resolveNames(items) {
     const idToName = {};
-    for (const tid of uniqueIds) {
+    const seen = new Set();
+    for (const item of items) {
+      // Normalize to {typeID, name?}
+      const tid = Number(typeof item === 'object' && item !== null ? item.typeID : item);
+      if (!tid || seen.has(tid)) continue;
+      seen.add(tid);
+      // 1. Directly supplied name
+      if (typeof item === 'object' && item !== null && item.name) {
+        idToName[tid] = item.name;
+        continue;
+      }
+      // 2. typeCatalog (may not be loaded)
       const info = typeCatalog.getById(tid);
-      if (info && info.name) idToName[tid] = info.name;
+      if (info && info.name) { idToName[tid] = info.name; continue; }
+      // 3. nameLookup fallback (recipes + ESI + projects + minerals)
+      if (typeof nameLookup === 'function') {
+        const n = nameLookup(tid);
+        // nameLookup returns "Type 12345" as last-resort placeholder — skip
+        // those because Janice can't price unresolvable names.
+        if (n && !/^Type \d+$/.test(n)) { idToName[tid] = n; continue; }
+      }
     }
     return idToName;
   }
@@ -12698,9 +12726,13 @@ function bindHandlers(project) {
       // Ignore double-clicks while a fetch is in flight.
       if (priceCache.getStatus() === 'loading') return;
       const agg = aggregateProjectShoppingList(project);
+      // Pass {typeID, name} objects rather than bare typeIDs. The shopping
+      // list already has canonical names from recipe data, so the Janice
+      // fetch doesn't need typeCatalog to be loaded first. priceCache.fetch
+      // accepts either shape.
       const typeIDs = [
-        ...agg.materials.map(e => e.typeID),
-        ...agg.fuel.map(e => e.typeID),
+        ...agg.materials.map(e => ({ typeID: e.typeID, name: e.name })),
+        ...agg.fuel.map(e => ({ typeID: e.typeID, name: e.name })),
       ];
       // Kick off the fetch (sets status='loading' synchronously before
       // awaiting the HTTP call), then render so the loading pill+spinner
