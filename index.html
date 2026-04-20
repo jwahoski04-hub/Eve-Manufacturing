@@ -5128,6 +5128,168 @@ function effectiveMfgBonus(productTypeID, stationID) {
 window.effectiveMfgBonus = effectiveMfgBonus;
 window.productRigCategory = productRigCategory;
 
+// =====================================================================
+// RIG PICKER HELPERS (Increment 5a + 5b) — pure data, no UI
+// =====================================================================
+
+// 5a — Rig family grouping. Reorganize the flat RIG_CATALOG into a nested
+// shape suitable for the rig slot dropdown:
+//
+//   [
+//     { family: 'Basic Large Ship ME', rigs: [T1 obj, T2 obj] },
+//     { family: 'Capital Ship ME',     rigs: [T1 obj, T2 obj] },
+//     ...
+//   ]
+//
+// Filter by structureType so users only see rigs that can actually be
+// fitted to the selected structure. Ordering matches the user-approved
+// order: ship rigs first (small → large → capital), components, then
+// equipment/ammo.
+//
+// The family name is derived from the rig's short name by stripping
+// the trailing " I" or " II" tier marker. So:
+//   'Basic Large Ship ME I'  → family 'Basic Large Ship ME'
+//   'Basic Large Ship ME II' → family 'Basic Large Ship ME'
+// Both end up under the same family with tiered rigs as sub-options.
+function getRigFamilies(structureType) {
+  // Determine which rigs fit this structure
+  const compatibleRigs = Object.values(RIG_CATALOG).filter(
+    rig => !structureType || rig.fits.includes(structureType)
+  );
+
+  // Group by family (name minus trailing tier indicator)
+  const families = new Map();  // family name → array of rig objects
+  for (const rig of compatibleRigs) {
+    // Strip trailing ' I' or ' II' — matches both tiers to the same family
+    const familyName = rig.name.replace(/\s+I{1,2}$/, '');
+    if (!families.has(familyName)) families.set(familyName, []);
+    families.get(familyName).push(rig);
+  }
+
+  // Sort rigs within each family by tier (T1 before T2)
+  for (const [, rigs] of families) {
+    rigs.sort((a, b) => a.tier - b.tier);
+  }
+
+  // User-approved family order: ships (small/medium/large/capital), then
+  // components (basic then advanced), then equipment, ammunition.
+  // Families not in this list come at the end in alphabetical order (future-proofing
+  // for when Phase 2 adds reaction/TE/research rigs).
+  const FAMILY_ORDER = [
+    'Basic Small Ship ME',
+    'Basic Medium Ship ME',
+    'Basic Large Ship ME',
+    'Advanced Small Ship ME',
+    'Advanced Medium Ship ME',
+    'Advanced Large Ship ME',
+    'Capital Ship ME',
+    'Basic Components ME',
+    'Advanced Components ME',
+    'Equipment ME',
+    'Ammunition ME',
+  ];
+  const orderIndex = (name) => {
+    const i = FAMILY_ORDER.indexOf(name);
+    return i === -1 ? FAMILY_ORDER.length : i;  // unknown families go last
+  };
+
+  return Array.from(families.entries())
+    .sort((a, b) => {
+      const d = orderIndex(a[0]) - orderIndex(b[0]);
+      return d !== 0 ? d : a[0].localeCompare(b[0]);
+    })
+    .map(([family, rigs]) => ({ family, rigs }));
+}
+
+// 5b — Compute effective manufacturing bonuses per product category for a
+// given config. The live preview panel in the rig picker (5c) displays
+// these values so users can visually verify their rig choices against
+// EVE's in-game Manufacturing info panel (the "Types Supported" section
+// from the earlier screenshot).
+//
+// Returns a map keyed by product category bucket:
+//   {
+//     largeShip:         -5.16,   // percent reduction (negative = reduction)
+//     advancedLargeShip: -5.16,
+//     component:         -1.00,
+//     ...
+//   }
+//
+// Output is percent points (e.g. -5.16 means "-5.16% material consumption"),
+// not a multiplier. The conversion from the multiplier effectiveMfgBonus
+// returns is: percent = (1 - multiplier) * -100. We negate so the sign
+// matches EVE's in-game convention (-4.2% = reduction).
+//
+// The config argument matches state.stationConfigs[stationID] shape:
+//   { structureType, rigSlots: [rigId, ...], systemSecurity, isWormhole?, wormholeClass? }
+//
+// Categories surveyed are the ones in our rig-targeting vocabulary. If
+// future Phase 2 rigs introduce new buckets (reaction categories etc.)
+// those can be appended without breaking existing ones.
+function computePreviewBonuses(config) {
+  const CATEGORIES = [
+    'smallShip', 'mediumShip', 'largeShip', 'capitalShip',
+    'advancedSmallShip', 'advancedMediumShip', 'advancedLargeShip',
+    'component', 'advancedComponent',
+    'equipment', 'ammunition',
+  ];
+
+  // Temporarily override state.stationConfigs['__preview__'] with the
+  // given config so we can reuse effectiveMfgBonus without refactoring.
+  // Restore the original on exit (or delete the preview key if it was
+  // fresh). This avoids duplicating effectiveMfgBonus's logic.
+  const PREVIEW_KEY = '__preview__';
+  const hadPrior = Object.prototype.hasOwnProperty.call(state.stationConfigs, PREVIEW_KEY);
+  const prior = state.stationConfigs[PREVIEW_KEY];
+  state.stationConfigs[PREVIEW_KEY] = config;
+
+  const bonuses = {};
+  try {
+    for (const cat of CATEGORIES) {
+      // Use a dummy typeID with a known category — we short-circuit the
+      // resolver by directly injecting productRigCategory's output. That
+      // means we need a typeID whose category_map entry matches `cat`.
+      //
+      // Simpler approach: pass a sentinel typeID and override the
+      // classifier. Even simpler: call the multiplier math directly
+      // without going through productRigCategory.
+      //
+      // Just reproduce the math inline. This mirrors what effectiveMfgBonus
+      // does but skips the group_id lookup (we already know the category).
+      const struct = STRUCTURE_TYPES[config.structureType];
+      if (!struct) { bonuses[cat] = 0; continue; }
+
+      let multiplier = struct.mfgMaterial;
+      const rigIds = config.rigSlots || [];
+      const secMult = rigSecurityMultiplier(
+        config.systemSecurity, config.isWormhole, config.wormholeClass
+      );
+      for (const rigId of rigIds) {
+        const rig = RIG_CATALOG[rigId];
+        if (!rig) continue;
+        if (rig.activity !== 'manufacturing') continue;
+        if (rig.bonusType !== 'material') continue;
+        if (!rig.categories.includes(cat)) continue;
+        const rigMult = 1 + (rig.basePercent * secMult) / 100;
+        multiplier *= rigMult;
+      }
+
+      // Convert multiplier → percent reduction. Round to 2 decimals for display.
+      bonuses[cat] = Math.round((multiplier - 1) * 10000) / 100;
+    }
+  } finally {
+    // Restore state
+    if (hadPrior) state.stationConfigs[PREVIEW_KEY] = prior;
+    else delete state.stationConfigs[PREVIEW_KEY];
+  }
+
+  return bonuses;
+}
+
+// Expose for console testing
+window.getRigFamilies = getRigFamilies;
+window.computePreviewBonuses = computePreviewBonuses;
+
 const LOCATIONS = {
   'loc-1dq':    { name: '1DQ1-A III - Moon 1 - Keepstar',                        shortName: '1DQ1 Keepstar', system: '1DQ1-A',  region: 'Delve',       security: -0.5, type: 'keepstar',    mfgMat: 0.99, reactionMat: 1.00 },
   'loc-sotiyo': { name: 'Y-MPWL VII - Moon 2 - Goonswarm Production Sotiyo',     shortName: 'YMPWL Sotiyo',   system: 'Y-MPWL',  region: 'Delve',       security: -0.5, type: 'sotiyo',      mfgMat: 0.99, reactionMat: 1.00 },
