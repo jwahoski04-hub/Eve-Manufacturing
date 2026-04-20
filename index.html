@@ -8090,9 +8090,13 @@ function renderMainApp() {
             <div class="quad-tabs">
               <button class="quad-tab ${state.rightTab === 'material' ? 'active' : ''}" data-right-tab="material">Material Detail</button>
               <button class="quad-tab ${state.rightTab === 'assets' ? 'active' : ''}" data-right-tab="assets">Assets</button>
-              <button class="quad-tab ${state.rightTab === 'stations' ? 'active' : ''}" data-right-tab="stations">Industry Stations</button>
+              ${state.rightTab === 'stations' ? `
+                <button class="quad-tab active" data-right-tab="stations">Industry Stations</button>
+              ` : ''}
               <button class="quad-tab ${state.rightTab === 'queue' ? 'active' : ''}" data-right-tab="queue">Job Queue</button>
-              <button class="quad-tab ${state.rightTab === 'characters' ? 'active' : ''}" data-right-tab="characters">Characters</button>
+              ${state.rightTab === 'characters' ? `
+                <button class="quad-tab active" data-right-tab="characters">Characters</button>
+              ` : ''}
             </div>
             <span class="quad-header-meta">${
               state.rightTab === 'material' ? q2HeaderMeta
@@ -12318,7 +12322,17 @@ function bindHandlers(project) {
 
   document.querySelectorAll('.project-card').forEach(el => {
     el.addEventListener('click', () => {
-      setState({ activeProjectId: el.dataset.projectId });
+      // If the user is on a drawer-gated tab (Stations or Characters) and
+      // switches projects, bounce them back to Material Detail. Those tabs
+      // are reached via the per-project drawer pill — carrying their active
+      // state across project switches produces weird UI where the tab strip
+      // shows a tab that the new project's drawer hasn't opened. Resetting
+      // to the default view aligns tab-strip state with the project switch.
+      const patch = { activeProjectId: el.dataset.projectId };
+      if (state.rightTab === 'stations' || state.rightTab === 'characters') {
+        patch.rightTab = 'material';
+      }
+      setState(patch);
     });
   });
 
