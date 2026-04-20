@@ -5265,6 +5265,79 @@ const RIG_CATALOG = {
     basePercent: -2.4, categories: ['ammunition'], tier: 2,
     fits: ['raitaru', 'azbel', 'sotiyo'],
   },
+
+  // ═════════════════════════════════════════════════════════════════════
+  // REACTION ME RIGS (Phase 2a)
+  // ═════════════════════════════════════════════════════════════════════
+  // Reaction rigs are distinct from manufacturing rigs in several ways:
+  //
+  // 1. They fit REFINERIES (Athanor / Tatara), not engineering complexes.
+  //    Athanor = 2 rig slots, Tatara = 3.
+  //
+  // 2. They target activity='reaction' (not 'manufacturing') — the walker's
+  //    effectiveBonus function in 2b will route to the right family based
+  //    on the recipe activity.
+  //
+  // 3. They have SMALLER security multipliers than mfg rigs:
+  //      Hisec:   1.0×
+  //      Lowsec:  1.0×   (NOT 1.9× like mfg rigs!)
+  //      Null/WH: 1.1×   (NOT 2.1× / 2.6× like mfg rigs!)
+  //    This matters a lot for correctness. A T1 Composite Reactor ME I
+  //    at your 3-F (null) gives -2.2% material reduction, not -4.2%.
+  //    Captured in reactionSecurityMultiplier() (added in 2b).
+  //
+  // 4. Each rig targets a SPECIFIC reaction type — composite, biochem, or
+  //    hybrid. The Composite rig does NOT affect hybrid reactions.
+  //    Categories used: 'compositeReaction', 'biochemReaction', 'hybridReaction'.
+  //
+  // 5. Source: EVERef type pages — 46486 (Composite T1), 46487 (Composite T2),
+  //    46512 (Hybrid T1), 46513 (Hybrid T2), 46510 (Biochem T1), 46511
+  //    (Biochem T2). Per EVERef's dogma attribute 2714 'Material Reduction
+  //    Bonus': T1 = -2%, T2 = -2.4%.
+
+  // ─── Composite Reactor ME (Fernite Carbide, Sylramic Fibers, etc.) ───
+  // This is the most likely rig you'd fit at 3-F based on your Panther chain.
+  // Affects moon-composite reaction products (T2 production intermediates).
+  'rig_compmeM_1': {
+    id: 'rig_compmeM_1', typeId: 46486, name: 'Composite Reactor ME I',
+    activity: 'reaction', bonusType: 'material',
+    basePercent: -2.0, categories: ['compositeReaction'], tier: 1,
+    fits: ['athanor', 'tatara'],
+  },
+  'rig_compmeM_2': {
+    id: 'rig_compmeM_2', typeId: 46487, name: 'Composite Reactor ME II',
+    activity: 'reaction', bonusType: 'material',
+    basePercent: -2.4, categories: ['compositeReaction'], tier: 2,
+    fits: ['athanor', 'tatara'],
+  },
+
+  // ─── Biochemical Reactor ME (booster chemicals, neurolink components) ───
+  'rig_biochemeM_1': {
+    id: 'rig_biochemeM_1', typeId: 46510, name: 'Biochemical Reactor ME I',
+    activity: 'reaction', bonusType: 'material',
+    basePercent: -2.0, categories: ['biochemReaction'], tier: 1,
+    fits: ['athanor', 'tatara'],
+  },
+  'rig_biochemeM_2': {
+    id: 'rig_biochemeM_2', typeId: 46511, name: 'Biochemical Reactor ME II',
+    activity: 'reaction', bonusType: 'material',
+    basePercent: -2.4, categories: ['biochemReaction'], tier: 2,
+    fits: ['athanor', 'tatara'],
+  },
+
+  // ─── Hybrid Reactor ME (Fullerite polymers for T3 production) ───────
+  'rig_hybrmeM_1': {
+    id: 'rig_hybrmeM_1', typeId: 46512, name: 'Hybrid Reactor ME I',
+    activity: 'reaction', bonusType: 'material',
+    basePercent: -2.0, categories: ['hybridReaction'], tier: 1,
+    fits: ['athanor', 'tatara'],
+  },
+  'rig_hybrmeM_2': {
+    id: 'rig_hybrmeM_2', typeId: 46513, name: 'Hybrid Reactor ME II',
+    activity: 'reaction', bonusType: 'material',
+    basePercent: -2.4, categories: ['hybridReaction'], tier: 2,
+    fits: ['athanor', 'tatara'],
+  },
 };
 
 // Product category classifier — maps an EVE typeID (via its groupId) to
@@ -5347,6 +5420,32 @@ const PRODUCT_CATEGORY_MAP = {
   // ── Charges / Ammo (category 8) ──────────────────────────────────────
   // Similar to modules — we'll handle this at category level in the lookup.
   // No explicit group entries here; the lookup treats category 8 as 'ammunition'.
+
+  // ── Reaction products (Phase 2a) ─────────────────────────────────────
+  // Reaction products map to reaction-specific categories, not to the same
+  // buckets as manufacturing products. When the walker's recipe is a
+  // reaction, effectiveBonus filters rigs by these categories.
+  //
+  // Source: EVERef rig pages (type 46486, 46510, 46512) 'Affected groups'
+  // fields, confirmed against the EVE SDE invGroups table.
+  //
+  // Note: Group 428 'Intermediate Materials' holds the classic composite
+  // reaction outputs like Fernite Carbide, Sylramic Fibers, Thulium Hafnite,
+  // etc. — the exact inputs your Panther chain's Fernite Carbide Composite
+  // Armor Plate uses. When you configure 3-F with a Composite Reactor ME
+  // rig, the Q2 tree's "Fernite Carbide" and "Sylramic Fibers" rows will
+  // reflect that bonus.
+  428:  'compositeReaction',  // Intermediate Materials (composite outputs)
+  429:  'compositeReaction',  // Composite (legacy — also composite outputs)
+  4032: 'compositeReaction',  // Intermediate material (new grouping)
+  4932: 'compositeReaction',  // Unrefined Mineral (used in some composite chains)
+
+  974:  'hybridReaction',     // Hybrid Polymers (T3 reaction intermediates)
+  1887: 'hybridReaction',     // Hybrid Polymer (additional group for hybrid)
+
+  712:  'biochemReaction',    // Booster (some booster intermediates)
+  1457: 'biochemReaction',    // Neurolink Protection Cell etc.
+  1470: 'biochemReaction',    // Isotropic boosters
 };
 
 // Category-level fallback — when a product's group isn't in PRODUCT_CATEGORY_MAP
