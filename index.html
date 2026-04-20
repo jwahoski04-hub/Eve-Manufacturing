@@ -6410,7 +6410,10 @@ const getActiveProject = () => PROJECTS.find(p => p.id === state.activeProjectId
 // Falls back gracefully if no recipe/BPC is found.
 function computeMaterials(project) {
   const productRecipe = getRecipe(project.product.typeID);
-  const mfgLoc = project.manufactureLocation;
+  // Use locationForActivity to respect per-project station overrides. Reading
+  // project.manufactureLocation directly misses stations set via the Industry
+  // Stations override UI, which stores selections in state.projectStations.
+  const mfgLoc = locationForActivity(project, 'manufacturing');
   // If we know the product's BPC, use real ME math; otherwise fall back to the old flat 1% bonus.
   let multiplier;
   if (productRecipe) {
@@ -8256,9 +8259,16 @@ function renderQ2MultiContent(selectedItems, project) {
     // walker in Q4 (projectNeed / blueprints accumulator) applies this
     // multiplier at every level; Q2's top level needs to do the same so the
     // two views agree.
+    //
+    // Use locationForActivity (not project.manufactureLocation directly) so
+    // per-project station overrides in state.projectStations are respected.
+    // Q4 uses locationForActivity; we match so the two stay in sync regardless
+    // of whether the user sets the station on the project object or via the
+    // Industry Stations override UI.
     const topRecipe = recipeResolver.getCachedByProduct(productTypeID);
+    const topLoc = topRecipe ? locationForActivity(project, topRecipe.activity) : null;
     const topMult = topRecipe
-      ? materialMultiplier(topRecipe.activity, topRecipe.bpTypeID, project.manufactureLocation, topRecipe.productTypeID)
+      ? materialMultiplier(topRecipe.activity, topRecipe.bpTypeID, topLoc, topRecipe.productTypeID)
       : 1.0;
 
     const childrenHtml = project.materials.map(m => {
@@ -8603,10 +8613,12 @@ function projectTotalNeed(project) {
   };
 
   // Start from product's top-level materials (the ship itself isn't walked — its inputs are)
+  // Use locationForActivity so per-project station overrides are respected.
   const productRecipe = getRecipe(project.product.typeID);
+  const topMfgLoc = locationForActivity(project, 'manufacturing');
   const topMult = productRecipe
-    ? materialMultiplier('manufacturing', productRecipe.bpTypeID, project.manufactureLocation, productRecipe.productTypeID)
-    : (LOCATIONS[project.manufactureLocation]?.mfgMat ?? 1.0);
+    ? materialMultiplier('manufacturing', productRecipe.bpTypeID, topMfgLoc, productRecipe.productTypeID)
+    : (LOCATIONS[topMfgLoc]?.mfgMat ?? 1.0);
   for (const m of project.materials) {
     walk(m.typeID, adjustedInputQty(m.qty, project.runs, topMult), 'manufacturing');
   }
@@ -9079,9 +9091,10 @@ function aggregateProjectShoppingList(project) {
   } else if (project.materials) {
     // Legacy fallback: walk the hardcoded project.materials list via RECIPES
     const productRecipe = getRecipe(project.product?.typeID);
+    const legacyMfgLoc = locationForActivity(project, 'manufacturing');
     const topMultiplier = productRecipe
-      ? materialMultiplier('manufacturing', productRecipe.bpTypeID, project.manufactureLocation, productRecipe.productTypeID)
-      : (LOCATIONS[project.manufactureLocation]?.mfgMat ?? 1.0);
+      ? materialMultiplier('manufacturing', productRecipe.bpTypeID, legacyMfgLoc, productRecipe.productTypeID)
+      : (LOCATIONS[legacyMfgLoc]?.mfgMat ?? 1.0);
     for (const m of project.materials) {
       const topQty = adjustedInputQty(m.qty, project.runs, topMultiplier);
       walk(m.typeID, topQty, m.name, 'manufacturing');
