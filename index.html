@@ -2556,6 +2556,136 @@
     white-space: nowrap;
   }
   .stations-option-bonus.has-bonus { color: #8cc86a; }
+
+  /* ===== Rig status pill (replaces the legacy "−X% mfg materials") =====
+     Three variants: rigged (amber, configured), unrigged (dim, click to set
+     up), npc (gray, non-clickable, NPC stations can't have rigs). */
+  .stations-option-bonus.rig-pill {
+    padding: 3px 8px;
+    border-radius: 2px;
+    border: 1px solid;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+  }
+  .stations-option-bonus.rig-pill-rigged {
+    background: rgba(215,158,60,0.10);
+    border-color: rgba(215,158,60,0.45);
+    color: #d79e3c;
+    cursor: pointer;
+  }
+  .stations-option-bonus.rig-pill-rigged:hover {
+    background: rgba(215,158,60,0.22);
+    color: #ffd684;
+  }
+  .stations-option-bonus.rig-pill-unrigged {
+    background: rgba(100,140,170,0.06);
+    border-color: rgba(100,140,170,0.45);
+    color: #7a9ab5;
+    border-style: dashed;
+    cursor: pointer;
+  }
+  .stations-option-bonus.rig-pill-unrigged:hover {
+    background: rgba(100,140,170,0.18);
+    color: #c0d4e5;
+    border-style: solid;
+  }
+  .stations-option-bonus.rig-pill-npc {
+    background: rgba(90,100,120,0.08);
+    border-color: rgba(90,100,120,0.35);
+    color: #5a6a82;
+    cursor: default;
+  }
+
+  /* Tooltip wrap — positions the styled tooltip panel absolutely next to the
+     pill. Uses CSS :hover on the parent wrap so no JS is needed. The panel
+     is hidden by default (opacity 0, pointer-events none) and fades in on
+     hover with a short transition. */
+  .stations-pill-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .stations-tooltip {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 6px;
+    min-width: 300px;
+    max-width: 380px;
+    background: #0a0f13;
+    border: 1px solid #2a3440;
+    border-radius: 2px;
+    padding: 10px 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #c0d4e5;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(215,158,60,0.12);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+    transition: opacity 0.12s, transform 0.12s;
+    z-index: 50;
+  }
+  .stations-pill-wrap:hover .stations-tooltip {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .stations-tooltip-title {
+    font-size: 12px;
+    color: #d79e3c;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .stations-tooltip-sub {
+    font-size: 9.5px;
+    color: #7a8a95;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .stations-tooltip-section-title {
+    font-size: 9.5px;
+    color: #8a9ba8;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .stations-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  .stations-tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    gap: 12px;
+  }
+  .stations-tooltip-row-label {
+    color: #b3bfc9;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+  }
+  .stations-tooltip-row-val {
+    color: #8a9ba8;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .stations-tooltip-row-val.boosted {
+    color: #8cc86a;
+  }
+  .stations-tooltip-gap {
+    height: 8px;
+  }
+  .stations-tooltip-dim {
+    color: #7a8a95;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+  .stations-tooltip-dim strong {
+    color: #d79e3c;
+  }
   /* Row wrapper — sibling layout so the delete button is OUTSIDE the <label>
      (clicks on it don't forward to the radio input). */
   .stations-option-row {
@@ -10141,6 +10271,168 @@ function stationActivityLabel(loc, activity) {
   return '';
 }
 
+// Build the rig-status pill + tooltip for a station row. Returns:
+//   { status, pillText, tooltipHtml }
+// where status is one of:
+//   'npc'       — NPC station, no rigs possible (pill says "NPC · NO RIGS")
+//   'unrigged'  — player structure with no saved rig config (pill says "UNRIGGED")
+//   'rigged'    — player structure with a saved rig config (pill says "RIGGED")
+//
+// tooltipHtml is a styled panel (see .stations-tooltip CSS) that mirrors
+// EVE's in-game Manufacturing info panel:
+//
+//   ┌──────────────────────────────────────┐
+//   │ Manufacturing                        │
+//   │                                      │
+//   │ TYPES SUPPORTED                      │
+//   │ ├─ Battleship        −4.2% (Rigs)    │
+//   │ └─ Black Ops         −4.2% (Rigs)    │
+//   │                                      │
+//   │ MATERIAL CONSUMPTION MODIFIERS       │
+//   │ ├─ Structure Role     −1.0%          │
+//   │ └─ Basic Large Ship   −4.2%          │
+//   └──────────────────────────────────────┘
+//
+// Only shows categories/rigs relevant to Phase 1 (manufacturing ME).
+// When Phase 2 adds TE/Research/Reaction rigs, this helper gains more
+// sections without the pill logic changing.
+function stationRigSummary(stationID) {
+  const loc = LOCATIONS[stationID];
+  if (!loc) return { status: 'unrigged', pillText: 'UNRIGGED', tooltipHtml: '' };
+
+  // NPC stations — short-circuit with a fixed tooltip.
+  if (loc.type === 'npc_station') {
+    return {
+      status: 'npc',
+      pillText: 'NPC · NO RIGS',
+      tooltipHtml: `
+        <div class="stations-tooltip-title">NPC Station</div>
+        <div class="stations-tooltip-body">
+          <div class="stations-tooltip-dim">
+            NPC stations are CCP-operated and cannot have rigs fitted.
+            Material costs are at the baseline 100% rate.
+          </div>
+        </div>
+      `,
+    };
+  }
+
+  const cfg = state.stationConfigs[stationID];
+
+  // Unrigged — no saved config. Minimal tooltip hinting what to do.
+  if (!cfg || !cfg.structureType) {
+    return {
+      status: 'unrigged',
+      pillText: 'UNRIGGED',
+      tooltipHtml: `
+        <div class="stations-tooltip-title">Unrigged Structure</div>
+        <div class="stations-tooltip-body">
+          <div class="stations-tooltip-dim">
+            No rig configuration saved. Click the <strong>Configure</strong>
+            badge next to the station name to enter structure type, system
+            security, and fitted rigs. Until then, only the default
+            structure role bonus is applied (if any).
+          </div>
+        </div>
+      `,
+    };
+  }
+
+  // Rigged — compute a tooltip that mirrors EVE's info panel format.
+  const struct = STRUCTURE_TYPES[cfg.structureType];
+  const secMult = rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+
+  // Build the "TYPES SUPPORTED" list — categories that actually get a
+  // non-baseline bonus. For each fitted rig that targets a category, that
+  // category appears here with the rig's effective percent (basePercent ×
+  // security multiplier). Categories not touched by any rig don't appear.
+  const CAT_LABELS = {
+    smallShip: 'Frigates & Destroyers (T1)',
+    mediumShip: 'Cruisers & BCs (T1)',
+    largeShip: 'Battleships (T1)',
+    capitalShip: 'Capital Ships',
+    advancedSmallShip: 'Frigates & Destroyers (T2)',
+    advancedMediumShip: 'Cruisers & BCs (T2)',
+    advancedLargeShip: 'Battleships (T2)',
+    component: 'Components (T1)',
+    advancedComponent: 'Components (T2)',
+    equipment: 'Modules / Equipment',
+    ammunition: 'Ammunition / Charges',
+  };
+
+  // categoryEffects accumulates the total rig effect per category.
+  // Multiple rigs on the same category stack multiplicatively; we present
+  // the combined effect as a single percent for clarity.
+  const categoryEffects = {};  // category → combined multiplier (starts at 1.0)
+  const fittedRigs = (cfg.rigSlots || []).map(id => RIG_CATALOG[id]).filter(Boolean);
+  for (const rig of fittedRigs) {
+    if (rig.activity !== 'manufacturing' || rig.bonusType !== 'material') continue;
+    const rigMult = 1 + (rig.basePercent * secMult) / 100;
+    for (const cat of rig.categories) {
+      categoryEffects[cat] = (categoryEffects[cat] ?? 1.0) * rigMult;
+    }
+  }
+
+  const typeRows = Object.entries(categoryEffects)
+    .map(([cat, mult]) => {
+      const pct = ((mult - 1) * 100).toFixed(1);
+      return `
+        <div class="stations-tooltip-row">
+          <span class="stations-tooltip-row-label">${escapeHtml(CAT_LABELS[cat] || cat)}</span>
+          <span class="stations-tooltip-row-val boosted">${pct}% (Rigs)</span>
+        </div>
+      `;
+    }).join('');
+
+  // Build the "MATERIAL CONSUMPTION MODIFIERS" list — structure role and
+  // each fitted rig listed individually with their effective percent.
+  const structPct = ((struct.mfgMaterial - 1) * 100).toFixed(1);
+  const structRow = `
+    <div class="stations-tooltip-row">
+      <span class="stations-tooltip-row-label">Structure Role Bonus</span>
+      <span class="stations-tooltip-row-val">${structPct}%</span>
+    </div>
+  `;
+  const rigRows = fittedRigs.map(rig => {
+    const effPct = (rig.basePercent * secMult).toFixed(1);
+    // Short name minus tier marker for display (e.g. "Basic Large Ship ME I")
+    return `
+      <div class="stations-tooltip-row">
+        <span class="stations-tooltip-row-label">${escapeHtml(rig.name)}</span>
+        <span class="stations-tooltip-row-val">${effPct}%</span>
+      </div>
+    `;
+  }).join('');
+
+  const secLabel = cfg.systemSecurity != null
+    ? `${cfg.systemSecurity.toFixed(1)} sec`
+    : 'unknown sec';
+
+  return {
+    status: 'rigged',
+    pillText: 'RIGGED',
+    tooltipHtml: `
+      <div class="stations-tooltip-title">Manufacturing</div>
+      <div class="stations-tooltip-sub">${escapeHtml(struct.name)} · ${escapeHtml(secLabel)}</div>
+      <div class="stations-tooltip-body">
+        ${typeRows ? `
+          <div class="stations-tooltip-section-title">TYPES SUPPORTED</div>
+          ${typeRows}
+          <div class="stations-tooltip-gap"></div>
+        ` : ''}
+        <div class="stations-tooltip-section-title">MATERIAL CONSUMPTION MODIFIERS</div>
+        ${structRow}
+        ${rigRows}
+        ${fittedRigs.length === 0 ? `
+          <div class="stations-tooltip-dim" style="margin-top: 4px;">
+            No rigs fitted — only the structure role bonus applies.
+          </div>
+        ` : ''}
+      </div>
+    `,
+  };
+}
+
 function renderIndustryStationsTab(project) {
   if (!project) {
     return `
@@ -10185,44 +10477,27 @@ function renderIndustryStationsTab(project) {
             </div>
           ` : available.map(({id, loc}) => {
             const isSelected = chosen === id;
-            const bonusLabel = stationActivityLabel(loc, act.key);
             const isManual = state.manualStations.has(id);
-            // Rig config badge — shows whether this station has structured rig
-            // data. Configured = "Azbel · 1/2 rigs" (amber, clickable to edit);
-            // unconfigured = "Configure" (dim, clickable to open empty picker).
-            // NPC stations show a non-clickable "NPC · no rigs" indicator so
-            // users understand why rigs can't be set (NPC stations lack rig
-            // slots entirely — they're CCP-operated fixed facilities).
-            const rigCfg = state.stationConfigs[id];
-            const structInfo = rigCfg ? STRUCTURE_TYPES[rigCfg.structureType] : null;
-            const isNpcStation = loc.type === 'npc_station';
-            let rigBadgeHtml = '';
-            if (isNpcStation) {
-              rigBadgeHtml = `
-                <span class="stations-rig-badge npc"
-                      title="NPC stations have no rig slots — bonuses are fixed at 0%">
-                  NPC · no rigs
-                </span>
-              `;
-            } else if (rigCfg && structInfo) {
-              const numFilled = (rigCfg.rigSlots || []).length;
-              const total = structInfo.rigSlots;
-              rigBadgeHtml = `
-                <span class="stations-rig-badge configured"
-                      data-edit-rigs="${escapeHtml(id)}"
-                      title="Click to edit rigs">
-                  ${escapeHtml(structInfo.name)} · ${numFilled}/${total} rigs
-                </span>
-              `;
-            } else {
-              rigBadgeHtml = `
-                <span class="stations-rig-badge unconfigured"
-                      data-edit-rigs="${escapeHtml(id)}"
-                      title="Click to configure structure type and rigs">
-                  Configure
-                </span>
-              `;
-            }
+            // Rig summary pill — replaces the old "−1% mfg materials" string
+            // with a clear RIGGED / UNRIGGED / NPC indicator plus a
+            // hover-tooltip that mirrors EVE's in-game Manufacturing info
+            // panel (categories + modifier breakdown).
+            const rigSummary = stationRigSummary(id);
+            const isNpcStation = rigSummary.status === 'npc';
+            // The pill is clickable for player structures (opens rig picker);
+            // NPC stations get a plain non-clickable indicator since there's
+            // nothing to configure.
+            const pillAttrs = isNpcStation
+              ? ''
+              : `data-edit-rigs="${escapeHtml(id)}" role="button" tabindex="0"`;
+            const pillHtml = `
+              <div class="stations-pill-wrap">
+                <div class="stations-option-bonus rig-pill rig-pill-${rigSummary.status}" ${pillAttrs}>
+                  ${rigSummary.pillText}
+                </div>
+                <div class="stations-tooltip">${rigSummary.tooltipHtml}</div>
+              </div>
+            `;
             // Delete rule: block if this station is used by the CURRENT project
             // for either activity (via override or project default).
             const mfgInUse = (overrides.manufacturing || project.manufactureLocation) === id;
@@ -10243,11 +10518,10 @@ function renderIndustryStationsTab(project) {
                   <div class="stations-option-info">
                     <div class="stations-option-name">
                       ${escapeHtml(loc.shortName || id)}
-                      ${rigBadgeHtml}
                     </div>
                     <div class="stations-option-sub">${escapeHtml(loc.system || '—')} · ${escapeHtml(loc.region || '—')}</div>
                   </div>
-                  <div class="stations-option-bonus ${bonusLabel.startsWith('-') ? 'has-bonus' : ''}">${bonusLabel}</div>
+                  ${pillHtml}
                 </label>
                 <button
                   type="button"
