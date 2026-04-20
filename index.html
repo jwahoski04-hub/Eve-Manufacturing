@@ -1889,6 +1889,31 @@
   }
   .q4-summary-val.warn { color: #d79e3c; }
   .q4-summary-val.ok { color: #6cc04a; }
+  /* Small circled "i" that shows a native tooltip (via title attr) on hover.
+     Used next to q4-summary labels to explain Market value vs shortfall rows. */
+  .q4-info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    margin-left: 5px;
+    border: 1px solid rgba(201, 168, 104, 0.5);
+    border-radius: 50%;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-style: italic;
+    font-weight: 600;
+    color: rgba(201, 168, 104, 0.75);
+    cursor: help;
+    vertical-align: middle;
+    line-height: 1;
+    transition: color 120ms, border-color 120ms;
+  }
+  .q4-info:hover {
+    color: #e8c078;
+    border-color: #c9a868;
+  }
 
   /* Site strip — build/react locations for this project */
   .q4-site-strip {
@@ -10899,19 +10924,19 @@ function renderProjectShoppingList(project) {
   return `
     <div class="q4-summary">
       <div class="q4-summary-row">
-        <span class="q4-summary-label">Market value</span>
+        <span class="q4-summary-label">Market value<span class="q4-info" title="Total ISK cost to buy every raw material and fuel block for this project at current Jita sell prices — ignores any stock you already own. This is the gross sticker price of the bill of materials.">i</span></span>
         <span class="q4-summary-val">${fmtISK(totalValue)}</span>
       </div>
       <div class="q4-summary-row">
-        <span class="q4-summary-label">To procure (at destination)</span>
+        <span class="q4-summary-label">To procure (at destination)<span class="q4-info" title="ISK you still need to spend if only stock already sitting at the build/react station counts. Stock parked in Jita, Amarr, or other stations is NOT subtracted here — it would have to be freighted in first. This is the pessimistic shortfall.">i</span></span>
         <span class="q4-summary-val ${totalShortfallLocal > 0 ? 'warn' : 'ok'}">${fmtISK(totalShortfallLocal)}</span>
       </div>
       <div class="q4-summary-row">
-        <span class="q4-summary-label">To procure (after transfers)</span>
+        <span class="q4-summary-label">To procure (after transfers)<span class="q4-info" title="ISK you still need to spend assuming you freight your elsewhere-stock to the build site before buying. Subtracts every unit you own across ALL your stations. The gap between this row and the 'at destination' row is the ISK value of stock worth hauling — shown in the Consider freighting panel below.">i</span></span>
         <span class="q4-summary-val ${totalShortfall > 0 ? 'warn' : 'ok'}">${fmtISK(totalShortfall)}</span>
       </div>
       <div class="q4-summary-row">
-        <span class="q4-summary-label">Blueprints ready</span>
+        <span class="q4-summary-label">Blueprints ready<span class="q4-info" title="Count of blueprints in this project's chain that are both owned AND already at their correct activity station with enough runs remaining. X / Y means X of Y required blueprints are ready to install — the rest are either missing, elsewhere, or out of runs.">i</span></span>
         <span class="q4-summary-val ${bpReadyCount === blueprints.length ? 'ok' : 'warn'}">${bpReadyCount} / ${blueprints.length}</span>
       </div>
     </div>
