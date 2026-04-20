@@ -610,13 +610,15 @@
     font-family: 'IBM Plex Mono', monospace;
     background: rgba(106, 72, 40, 0.08);
   }
-  .recipe-loading-chip .rlc-spinner {
+  .recipe-loading-chip .rlc-spinner,
+  .rlc-spinner {
     width: 8px;
     height: 8px;
     border: 1px solid rgba(201, 182, 118, 0.3);
     border-top-color: #c9b676;
     border-radius: 50%;
     animation: rlc-spin 0.8s linear infinite;
+    display: inline-block;
   }
   @keyframes rlc-spin {
     to { transform: rotate(360deg); }
@@ -686,6 +688,64 @@
   }
   .quad-header-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1.8px; color: #8a7048; }
   .quad-header-meta { font-size: 10px; color: #5b7280; font-family: 'IBM Plex Mono', monospace; }
+  /* Pricing variant — three-column layout for the Q4 header: title | controls | meta.
+     Used when the header needs to host the 'Fetch Prices' action in the center. */
+  .quad-header-pricing {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: center;
+  }
+  .quad-header-pricing .quad-header-title { justify-self: start; }
+  .quad-header-pricing .quad-header-meta  { justify-self: end; }
+  .pricing-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-self: center;
+  }
+  .pricing-fetch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    background: rgba(201, 168, 104, 0.1);
+    border: 1px solid rgba(201, 168, 104, 0.4);
+    color: #c9a868;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .pricing-fetch-btn:hover:not(:disabled) {
+    background: rgba(201, 168, 104, 0.2);
+    color: #e8d296;
+    box-shadow: 0 0 8px rgba(201, 168, 104, 0.25);
+  }
+  .pricing-fetch-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    font-style: italic;
+  }
+  .pricing-pill {
+    padding: 2px 8px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    border: 1px solid;
+    white-space: nowrap;
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pricing-pill-idle    { color: #6c8592; border-color: #2a3a48; background: rgba(40,56,72,0.2); }
+  .pricing-pill-loading { color: #c9a868; border-color: #8a6030; background: rgba(201,168,104,0.1); }
+  .pricing-pill-ok      { color: #6cc04a; border-color: #3a6020; background: rgba(108,192,74,0.08); }
+  .pricing-pill-stale   { color: #d79e3c; border-color: #8a6030; background: rgba(215,158,60,0.1); }
+  .pricing-pill-error   { color: #e89b8d; border-color: #6a2828; background: rgba(138,40,40,0.15); }
+
   .quad-body { flex: 1; overflow-y: auto; padding: 12px; }
   .quad-placeholder {
     flex: 1;
@@ -6751,6 +6811,188 @@ const MARKET_PRICES = {
   29097: 1200000, 29101: 1320000, 29107: 1450000,
 };
 
+// =====================================================================
+// PRICING MODULE — Janice integration + localStorage cache
+// =====================================================================
+// Fetches Jita sell prices from https://janice.e-351.com (market=2 = Jita)
+// and persists them to localStorage so reloads don't trigger refetches.
+// The hardcoded MARKET_PRICES above provides fallback defaults; fetched
+// prices overlay on top per typeID.
+//
+// API:
+//   priceCache.hydrate()          — load cache from localStorage into MARKET_PRICES
+//   priceCache.fetch(typeIDs)     — fetch from Janice, update MARKET_PRICES + cache
+//   priceCache.getLastFetched()   — ms timestamp of last successful fetch, or null
+//   priceCache.getStatus()        — 'idle' | 'loading' | 'ok' | 'error'
+//   priceCache.getError()         — last error message or null
+//   priceCache.ageHours()         — hours since last fetch, or null if never
+//
+// Janice API reference:
+//   POST https://janice.e-351.com/api/rest/v2/pricer?market=2
+//   Headers: X-ApiKey, Content-Type: text/plain
+//   Body:    item names, one per line
+//   Response: [{ itemType: {eid, name}, immediatePrices: {sellPrice}, top5AveragePrices: {sellPrice} }]
+// 'immediatePrices' is the live best-available sell order; 'top5AveragePrices'
+// is a smoothed average of the top 5. We prefer immediate, fall back to top5.
+const priceCache = (() => {
+  const LS_KEY = 'eveIndustry.priceCache.v1';
+  // Shared public API key from the Janice project README. Same key used by
+  // the PI Planner tool the user referenced. Per Janice's docs this key is
+  // rate-limited; if it ever gets blocked, users can request their own.
+  const JANICE_KEY = 'G9KwKq3465588VPd6747t95Zh94q3W2E';
+  const JANICE_URL = 'https://janice.e-351.com/api/rest/v2/pricer?market=2';
+
+  let lastFetched = null;   // ms timestamp
+  let status = 'idle';      // 'idle' | 'loading' | 'ok' | 'error'
+  let lastError = null;
+
+  function hydrate() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data && typeof data.prices === 'object' && data.prices) {
+        for (const [typeID, price] of Object.entries(data.prices)) {
+          MARKET_PRICES[typeID] = price;
+        }
+      }
+      if (typeof data.fetchedAt === 'number') lastFetched = data.fetchedAt;
+      status = lastFetched ? 'ok' : 'idle';
+    } catch (e) {
+      // Corrupt cache — silently ignore. Defaults remain.
+    }
+  }
+
+  function persist(priceMap) {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        fetchedAt: lastFetched,
+        prices: priceMap,
+      }));
+    } catch (e) {
+      // Storage full or disabled — not critical; prices still work in-memory.
+    }
+  }
+
+  // Collect the pricing payload: { typeID → name } for all unique typeIDs
+  // the caller wants to price. Uses typeCatalog to resolve names.
+  function resolveNames(typeIDs) {
+    const uniqueIds = Array.from(new Set(typeIDs.map(Number).filter(Boolean)));
+    const idToName = {};
+    for (const tid of uniqueIds) {
+      const info = typeCatalog.getById(tid);
+      if (info && info.name) idToName[tid] = info.name;
+    }
+    return idToName;
+  }
+
+  async function fetch_(typeIDs) {
+    status = 'loading';
+    lastError = null;
+    const idToName = resolveNames(typeIDs);
+    const names = Object.values(idToName);
+    if (names.length === 0) {
+      status = 'error';
+      lastError = 'No typeIDs could be resolved to names';
+      return { ok: false, error: lastError, updated: 0 };
+    }
+    try {
+      const body = names.join('\n');
+      const resp = await fetch(JANICE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+          'X-ApiKey': JANICE_KEY,
+        },
+        body,
+      });
+      if (!resp.ok) {
+        status = 'error';
+        lastError = `Janice HTTP ${resp.status}`;
+        return { ok: false, error: lastError, updated: 0 };
+      }
+      const data = await resp.json();
+      // Name → typeID lookup (inverse of idToName) so we can match responses
+      // back to the typeIDs the user uses as keys.
+      const nameToId = {};
+      for (const [tid, name] of Object.entries(idToName)) nameToId[name] = Number(tid);
+      const freshPrices = {};
+      let updated = 0;
+      for (const item of data) {
+        const name = item?.itemType?.name;
+        // Janice includes itemType.eid (typeID) — prefer that if present;
+        // fall back to name match if eid is missing.
+        const eid = item?.itemType?.eid;
+        const tid = eid || nameToId[name];
+        if (!tid) continue;
+        // Prefer immediate sell (live best order) over top5 average.
+        let sell = null;
+        if (item.immediatePrices && item.immediatePrices.sellPrice != null) {
+          sell = item.immediatePrices.sellPrice;
+        } else if (item.top5AveragePrices && item.top5AveragePrices.sellPrice != null) {
+          sell = item.top5AveragePrices.sellPrice;
+        }
+        if (sell != null && sell > 0) {
+          MARKET_PRICES[tid] = sell;
+          freshPrices[tid] = sell;
+          updated++;
+        }
+      }
+      lastFetched = Date.now();
+      status = 'ok';
+      // Persist: merge freshPrices into whatever's already cached to avoid
+      // losing prices for typeIDs not included in this fetch batch.
+      let persistedMap = {};
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.prices) persistedMap = parsed.prices;
+        }
+      } catch (_) {}
+      Object.assign(persistedMap, freshPrices);
+      persist(persistedMap);
+      return { ok: true, updated, total: names.length };
+    } catch (err) {
+      status = 'error';
+      lastError = err.message || String(err);
+      return { ok: false, error: lastError, updated: 0 };
+    }
+  }
+
+  function ageHours() {
+    if (!lastFetched) return null;
+    return (Date.now() - lastFetched) / (1000 * 60 * 60);
+  }
+
+  // Human-readable "5 minutes ago" / "2 hours ago" / etc. for the UI.
+  function ageLabel() {
+    if (!lastFetched) return 'never';
+    const ms = Date.now() - lastFetched;
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
+
+  return {
+    hydrate,
+    fetch: fetch_,
+    getLastFetched: () => lastFetched,
+    getStatus: () => status,
+    getError: () => lastError,
+    ageHours,
+    ageLabel,
+  };
+})();
+
+// Hydrate cache on load — runs synchronously so MARKET_PRICES is populated
+// before the first render reads from it.
+priceCache.hydrate();
+window.priceCache = priceCache;  // expose for console debugging
+
 const CHARACTER = { name: 'Kestrel Vex', wallet: 1847392441 };
 
 // =====================================================================
@@ -8202,8 +8444,45 @@ function renderMainApp() {
           <div class="c-mark c-tr"></div>
           <div class="c-mark c-bl"></div>
           <div class="c-mark c-br"></div>
-          <div class="quad-header">
+          <div class="quad-header quad-header-pricing">
             <span class="quad-header-title">Market & Costs</span>
+            ${(() => {
+              // Fetch Prices button + status pill. Lives in the header so
+              // it's always visible and can reflect 'stale' state next to
+              // the title. The pill shows:
+              //   idle (never fetched) → "Never fetched"
+              //   loading              → spinner + "Fetching…"
+              //   ok                   → "Updated 5m ago" (green-ish)
+              //   error                → "Fetch failed: <reason>" (red)
+              // When prices are older than 24h, the pill goes amber even
+              // if the last fetch was successful — time-based stale marker.
+              const status = priceCache.getStatus();
+              const age = priceCache.ageHours();
+              const stale = age != null && age > 24;
+              let pillCls = 'pricing-pill-idle';
+              let pillText = 'Prices: never fetched';
+              if (status === 'loading') {
+                pillCls = 'pricing-pill-loading';
+                pillText = 'Fetching Jita prices…';
+              } else if (status === 'error') {
+                pillCls = 'pricing-pill-error';
+                pillText = `Fetch failed · ${priceCache.getError() || 'unknown'}`;
+              } else if (status === 'ok') {
+                pillCls = stale ? 'pricing-pill-stale' : 'pricing-pill-ok';
+                pillText = `Jita prices · ${priceCache.ageLabel()}${stale ? ' (stale)' : ''}`;
+              }
+              const btnLabel = status === 'ok' ? 'Refresh Prices' : 'Fetch Prices';
+              const btnDisabled = status === 'loading' ? 'disabled' : '';
+              return `
+                <div class="pricing-controls">
+                  <button class="pricing-fetch-btn" id="pricing-fetch-btn" ${btnDisabled}
+                          title="Fetch live Jita sell prices from Janice for all materials and fuel in this project's shopping list">
+                    ${status === 'loading' ? '<span class="rlc-spinner"></span> ' : ''}${btnLabel}
+                  </button>
+                  <span class="pricing-pill ${pillCls}">${escapeHtml(pillText)}</span>
+                </div>
+              `;
+            })()}
             <span class="quad-header-meta">${project.product.name.toUpperCase()}</span>
           </div>
           <div class="quad-body" style="padding: 0;">
@@ -12409,6 +12688,30 @@ function bindHandlers(project) {
       q2ToggleItemExpansion(el.dataset.collapseItem);
     });
   });
+
+  // Pricing: fetch Jita sell prices from Janice for the current project's
+  // Q4 shopping list. Materials + fuel only — blueprints are owned items,
+  // not market goods (and Janice's name-matching for BPC names is unreliable).
+  const fetchBtn = document.getElementById('pricing-fetch-btn');
+  if (fetchBtn) {
+    fetchBtn.addEventListener('click', async () => {
+      // Ignore double-clicks while a fetch is in flight.
+      if (priceCache.getStatus() === 'loading') return;
+      const agg = aggregateProjectShoppingList(project);
+      const typeIDs = [
+        ...agg.materials.map(e => e.typeID),
+        ...agg.fuel.map(e => e.typeID),
+      ];
+      // Kick off the fetch (sets status='loading' synchronously before
+      // awaiting the HTTP call), then render so the loading pill+spinner
+      // become visible while we wait for the response.
+      const fetchPromise = priceCache.fetch(typeIDs);
+      render();
+      await fetchPromise;
+      // Final render with ok/error pill + refreshed BUY column values.
+      render();
+    });
+  }
 
   // Multibuy: mode toggle + copy button
   document.querySelectorAll('[data-multibuy-mode]').forEach(el => {
