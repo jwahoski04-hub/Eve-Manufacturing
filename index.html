@@ -12811,6 +12811,24 @@ function bindHandlers(project) {
       if (state.rightTab === 'stations' || state.rightTab === 'characters') {
         patch.rightTab = 'material';
       }
+      // Auto-collapse the More drawer on project-card clicks. A click on a
+      // project card = "focus this project", which means a clean material-
+      // detail view, not configuration mode. Collapses both the outgoing
+      // active project's drawer AND the incoming project's drawer (which
+      // could have been left open in a prior session). The drawer is
+      // always one ⚙ More click away if the user wants it back.
+      let drawerChanged = false;
+      const outgoingID = state.activeProjectId;
+      const incomingID = el.dataset.projectId;
+      if (outgoingID && state.projectCardExpanded[outgoingID]) {
+        state.projectCardExpanded[outgoingID] = false;
+        drawerChanged = true;
+      }
+      if (incomingID && state.projectCardExpanded[incomingID]) {
+        state.projectCardExpanded[incomingID] = false;
+        drawerChanged = true;
+      }
+      if (drawerChanged) saveProjectCardExpanded();
       setState(patch);
     });
   });
