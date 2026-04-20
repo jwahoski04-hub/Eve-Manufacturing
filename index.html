@@ -1262,6 +1262,215 @@
     background: #0a0f13;
   }
 
+  /* ============ Rig Picker modal (Increment 5c) ============ */
+  /* Mirrors .np-* chrome (same overlay, panel shape, header, footer buttons)
+     so the tool has a consistent modal language. Adds .rp-slot-row for the
+     per-rig-slot controls and .rp-preview-* for the live preview panel. */
+  .rp-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .rp-panel {
+    background: #0a0f13;
+    border: 1px solid #2a3440;
+    border-radius: 2px;
+    width: 560px;
+    max-width: 96vw;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(215,158,60,0.1);
+  }
+  .rp-header {
+    padding: 16px 18px;
+    border-bottom: 1px solid #1f2a35;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .rp-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    color: #d79e3c;
+    text-transform: uppercase;
+  }
+  .rp-sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #7a8a95;
+    letter-spacing: 0.05em;
+    margin-top: 4px;
+  }
+  .rp-close {
+    background: transparent;
+    border: 1px solid #2a3440;
+    color: #7a8a95;
+    width: 28px; height: 28px;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .rp-close:hover { color: #e8eef2; border-color: #d79e3c; }
+  .rp-body {
+    padding: 14px 18px 4px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .rp-field { margin-bottom: 14px; }
+  .rp-label {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #8a9ba8;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .rp-select, .rp-input {
+    width: 100%;
+    background: #0d1319;
+    border: 1px solid #2a3440;
+    color: #e8eef2;
+    padding: 8px 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    border-radius: 2px;
+    box-sizing: border-box;
+  }
+  .rp-select:focus, .rp-input:focus {
+    outline: none;
+    border-color: #d79e3c;
+  }
+  .rp-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  /* Rig slot rows. Each row is ONE slot, labeled "Slot N" on the left
+     and holding a single <select> on the right for the rig choice. */
+  .rp-slot-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .rp-slot-row {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 10px;
+    align-items: center;
+  }
+  .rp-slot-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #8a9ba8;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* Preview panel — shows effective bonus per product category so the user
+     can compare to the in-game Manufacturing info tooltip before saving. */
+  .rp-preview {
+    border-top: 1px solid #1f2a35;
+    padding-top: 12px;
+    margin-top: 6px;
+  }
+  .rp-preview-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #8a9ba8;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .rp-preview-hint {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #5b7280;
+    margin-bottom: 10px;
+    letter-spacing: 0.02em;
+  }
+  .rp-preview-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    row-gap: 3px;
+    column-gap: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+  }
+  .rp-preview-cat {
+    color: #b3bfc9;
+  }
+  .rp-preview-val {
+    text-align: right;
+    color: #7a8a95;           /* baseline (-1% structure only) */
+  }
+  .rp-preview-val.boosted {
+    color: #d79e3c;           /* amber — rig is actively boosting this category */
+  }
+
+  /* Warning / confirmation block inside the modal body. */
+  .rp-confirm-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(215,158,60,0.06);
+    border: 1px solid rgba(215,158,60,0.35);
+    border-radius: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #e8eef2;
+    letter-spacing: 0.02em;
+  }
+  .rp-confirm-box strong { color: #d79e3c; }
+
+  .rp-error {
+    padding: 8px 12px;
+    background: rgba(168,104,104,0.10);
+    border: 1px solid rgba(168,104,104,0.45);
+    border-radius: 2px;
+    color: #d88686;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    margin-bottom: 12px;
+  }
+
+  .rp-footer {
+    padding: 12px 18px;
+    border-top: 1px solid #1f2a35;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .rp-btn {
+    background: #121a22;
+    border: 1px solid #2a3440;
+    color: #b3bfc9;
+    padding: 8px 16px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .rp-btn:hover { background: #1a2430; color: #e8eef2; }
+  .rp-btn-primary {
+    background: rgba(215,158,60,0.12);
+    border-color: #d79e3c;
+    color: #d79e3c;
+  }
+  .rp-btn-primary:hover { background: rgba(215,158,60,0.2); color: #ffd684; }
+  .rp-btn-primary:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    background: #0a0f13;
+  }
+
   /* ============== Q2 — Material detail ============== */
   /* Toolbar at top of Q2 (was tabs, now just label + expand/collapse actions) */
   /* Divider between stacked items in multi-select view */
@@ -6253,6 +6462,31 @@ let state = {
     catalogStage: '',            // 'fetching' | 'parsing' | 'ready' | ''
     error: '',
   },
+  // Rig Picker modal state (Increment 5c). Opens when the user clicks the
+  // "Edit Rigs" button on a station card in the Industry Stations tab.
+  //
+  // The modal edits a WORKING COPY of the station's config (workingConfig)
+  // until the user clicks Save. That way Cancel truly discards changes and
+  // the preview panel can update reactively without touching the real
+  // state.stationConfigs until the user commits.
+  //
+  // Fields:
+  //   open           — true while the modal is visible
+  //   stationID      — which station the user is editing (null when closed)
+  //   workingConfig  — editable copy of state.stationConfigs[stationID], shape:
+  //                      { structureType, rigSlots: [...], systemSecurity }
+  //                    For a fresh config this starts as { structureType: null,
+  //                    rigSlots: [], systemSecurity: <auto-detected or null> }
+  //   confirmingSave — true during the "overwrite existing config?" confirmation
+  //                    dialog (only relevant when editing an existing config)
+  //   error          — any message to show at the top of the modal (validation etc.)
+  rigPickerModal: {
+    open: false,
+    stationID: null,
+    workingConfig: null,
+    confirmingSave: false,
+    error: '',
+  },
 };
 
 // Persist disabledStations to localStorage whenever it changes
@@ -6767,6 +7001,7 @@ function renderEmptyProjectsState() {
       </div>
     </div>
     ${state.newProjectModal.open ? renderNewProjectModal() : ''}
+    ${state.rigPickerModal.open ? renderRigPickerModal() : ''}
   `;
   // Re-use existing bindHandlers only for the modal — the rest of the UI
   // doesn't exist in this empty state. We directly wire the one button.
@@ -7319,6 +7554,7 @@ function renderMainApp() {
       </div>
     </div>
     ${state.newProjectModal.open ? renderNewProjectModal() : ''}
+    ${state.rigPickerModal.open ? renderRigPickerModal() : ''}
   `;
 
   bindHandlers(project);
@@ -7429,6 +7665,198 @@ function renderNewProjectModal() {
         <div class="np-footer">
           <button class="np-btn" data-np-close>Cancel</button>
           <button class="np-btn np-btn-primary" data-np-create ${!canCreate ? 'disabled' : ''}>Create</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
+// =====================================================================
+// Rig Picker modal (Increment 5c) — configure a station's structure + rigs
+// =====================================================================
+//
+// Opens via the "Edit Rigs" button on an Industry Stations tab card (5e).
+// Reads and writes state.rigPickerModal.workingConfig; only commits to
+// state.stationConfigs on Save (5d handles the commit).
+//
+// Layout (top to bottom inside the panel body):
+//   1. Error box (shown when validation/auto-detect fails)
+//   2. Structure Type dropdown
+//   3. System Security field (auto-prefilled from LOCATIONS[x].security)
+//   4. Rig Slot dropdowns — N rows, N from STRUCTURE_TYPES[structureType].rigSlots
+//   5. Preview panel — effective bonuses per product category
+//   6. Confirmation box (only when overwriting an existing config)
+//
+// Footer:
+//   - Cancel: discards workingConfig
+//   - Save:   commits to state.stationConfigs[stationID]
+// =====================================================================
+function renderRigPickerModal() {
+  const m = state.rigPickerModal;
+  const cfg = m.workingConfig || {};
+  const struct = cfg.structureType ? STRUCTURE_TYPES[cfg.structureType] : null;
+  const numSlots = struct ? struct.rigSlots : 0;
+
+  // Location context — used for the modal header subtitle and to auto-detect
+  // system security when the user hasn't manually set one.
+  const loc = LOCATIONS[m.stationID];
+  const stationName = loc?.shortName || loc?.name || m.stationID || 'Station';
+  const systemLabel = loc?.system ? `${loc.system}` : '';
+
+  // Build the structure-type dropdown. Options come from STRUCTURE_TYPES.
+  // NPC stations are filtered out because they have no rigs to configure.
+  const structureOptions = ['<option value="">— Select —</option>']
+    .concat(
+      Object.entries(STRUCTURE_TYPES)
+        .filter(([, s]) => s.category !== 'npc')
+        .map(([key, s]) =>
+          `<option value="${key}" ${cfg.structureType === key ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
+        )
+    )
+    .join('');
+
+  // Build the rig slot <select>s. Each has an ungrouped "— Empty —" option
+  // at the top, then one <optgroup> per family, each group containing T1
+  // and T2 variants. Families are filtered to ones that fit the selected
+  // structure type via getRigFamilies.
+  const families = struct ? getRigFamilies(cfg.structureType) : [];
+  const rigSlotSelect = (slotIndex) => {
+    const currentRigId = (cfg.rigSlots || [])[slotIndex] || '';
+    const optgroups = families.map(({ family, rigs }) => {
+      const opts = rigs.map(r =>
+        `<option value="${r.id}" ${currentRigId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
+      ).join('');
+      return `<optgroup label="${escapeHtml(family)}">${opts}</optgroup>`;
+    }).join('');
+    return `
+      <select class="rp-select" data-rp-slot="${slotIndex}">
+        <option value="">— Empty —</option>
+        ${optgroups}
+      </select>
+    `;
+  };
+
+  // Preview grid — show effective bonus per category when we have a
+  // structure type selected. Categories with a non-baseline bonus (i.e., a
+  // fitted rig is actively boosting them) are highlighted amber; baseline
+  // (structure role only) stays dim so the active targets stand out.
+  let previewHtml = '';
+  if (struct) {
+    // Use the 5b helper. Pass the current working config so the user sees
+    // exactly what will be saved if they click Save right now.
+    const bonuses = computePreviewBonuses(cfg);
+    // Friendly labels + display order matching the rig family order.
+    const CAT_DISPLAY = [
+      ['smallShip',         'Small Ships (T1)'],
+      ['mediumShip',        'Medium Ships (T1)'],
+      ['largeShip',         'Large Ships (T1)'],
+      ['capitalShip',       'Capital Ships'],
+      ['advancedSmallShip', 'Small Ships (T2)'],
+      ['advancedMediumShip','Medium Ships (T2)'],
+      ['advancedLargeShip', 'Large Ships (T2)'],
+      ['component',         'Components (T1)'],
+      ['advancedComponent', 'Components (T2)'],
+      ['equipment',         'Modules / Equipment'],
+      ['ammunition',        'Ammunition / Charges'],
+    ];
+    // Structure role baseline — the percent you'd get with NO matching rigs.
+    // We use this to detect whether a category is "boosted" by a fitted rig
+    // vs. just inheriting the structure role. Tiny epsilon for float safety.
+    const baseline = Math.round((struct.mfgMaterial - 1) * 10000) / 100;
+    const cells = CAT_DISPLAY.map(([cat, label]) => {
+      const pct = bonuses[cat] ?? 0;
+      const boosted = Math.abs(pct - baseline) > 0.01;
+      const sign = pct > 0 ? '+' : '';
+      return `
+        <div class="rp-preview-cat">${escapeHtml(label)}</div>
+        <div class="rp-preview-val ${boosted ? 'boosted' : ''}">${sign}${pct.toFixed(2)}%</div>
+      `;
+    }).join('');
+    previewHtml = `
+      <div class="rp-preview">
+        <div class="rp-preview-title">Effective Manufacturing Bonuses</div>
+        <div class="rp-preview-hint">
+          Verify against EVE's in-game Manufacturing info (right-click station → Show Info).
+          Amber rows mean a fitted rig is actively boosting that category.
+        </div>
+        <div class="rp-preview-grid">${cells}</div>
+      </div>
+    `;
+  }
+
+  // Overwrite confirmation — shown only when editing an existing saved config
+  // AND the user has clicked Save once (handled by 5d event wiring). When
+  // confirmingSave is true, the primary button changes from "Save" to
+  // "Confirm Overwrite" so the user has a deliberate second click.
+  const hasExisting = !!state.stationConfigs[m.stationID];
+  const confirmBoxHtml = m.confirmingSave && hasExisting ? `
+    <div class="rp-confirm-box">
+      <strong>Overwrite existing config?</strong>
+      This station already has rigs configured. Saving will replace them with
+      the selections above. Click <strong>Confirm Overwrite</strong> to proceed,
+      or Cancel to keep the current saved config.
+    </div>
+  ` : '';
+
+  // Validation — Save is enabled only when structure type is set AND all
+  // slots are either empty or assigned (no undefined/partial state).
+  const canSave = !!cfg.structureType;
+
+  // Slot rows: one <select> per rig slot allowed by the structure.
+  const slotRowsHtml = Array.from({ length: numSlots }, (_, i) => `
+    <div class="rp-slot-row">
+      <div class="rp-slot-label">Slot ${i + 1}</div>
+      ${rigSlotSelect(i)}
+    </div>
+  `).join('');
+
+  return `
+    <div class="rp-overlay" data-rp-overlay>
+      <div class="rp-panel" onclick="event.stopPropagation()">
+        <div class="rp-header">
+          <div>
+            <div class="rp-title">Edit Station Rigs</div>
+            <div class="rp-sub">${escapeHtml(stationName)}${systemLabel ? ' · ' + escapeHtml(systemLabel) : ''}</div>
+          </div>
+          <button class="rp-close" data-rp-close title="Cancel">×</button>
+        </div>
+        <div class="rp-body">
+          ${m.error ? `<div class="rp-error">${escapeHtml(m.error)}</div>` : ''}
+
+          <div class="rp-row">
+            <div class="rp-field">
+              <label class="rp-label">Structure Type</label>
+              <select class="rp-select" data-rp-structure>${structureOptions}</select>
+            </div>
+            <div class="rp-field">
+              <label class="rp-label">System Security</label>
+              <input class="rp-input" type="number" step="0.1" min="-1.0" max="1.0"
+                data-rp-security
+                value="${cfg.systemSecurity != null ? cfg.systemSecurity : ''}"
+                placeholder="-0.1 / 0.4 / 0.9">
+            </div>
+          </div>
+
+          ${numSlots > 0 ? `
+            <div class="rp-field">
+              <label class="rp-label">Rig Slots (${numSlots})</label>
+              <div class="rp-slot-list">${slotRowsHtml}</div>
+            </div>
+          ` : cfg.structureType ? `
+            <div class="rp-preview-hint" style="margin-bottom: 14px;">
+              This structure type has no rig slots.
+            </div>
+          ` : ''}
+
+          ${previewHtml}
+          ${confirmBoxHtml}
+        </div>
+        <div class="rp-footer">
+          <button class="rp-btn" data-rp-close>Cancel</button>
+          <button class="rp-btn rp-btn-primary" data-rp-save ${!canSave ? 'disabled' : ''}>
+            ${m.confirmingSave && hasExisting ? 'Confirm Overwrite' : 'Save'}
+          </button>
         </div>
       </div>
     </div>
@@ -9698,7 +10126,6 @@ function renderIndustryStationsTab(project) {
           ${chosen ? `
             <div class="stations-section-current">
               Currently: <strong>${escapeHtml(LOCATIONS[chosen]?.shortName || chosen)}</strong>
-              ${isDefault ? ' <span class="stations-default-badge">PROJECT DEFAULT</span>' : ' <span class="stations-override-badge">OVERRIDE</span>'}
             </div>
           ` : `<div class="stations-section-current stations-section-none">No station assigned</div>`}
         </div>
