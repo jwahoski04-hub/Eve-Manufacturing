@@ -8527,11 +8527,13 @@ function bpcMEAt(bpTypeID, locationID) {
   // First, check for BPCs at the exact location (local).
   const localBpcs = bpcsAt(bpTypeID, locationID);
   if (localBpcs.length > 0) {
-    // Prefer highest ME, then most runs — matches previous behavior
+    // Prefer highest ME, then non-BPO (real BPCs), then most runs.
     const best = localBpcs.reduce((a, b) => {
-      if (b.me > a.me) return b;
-      if (b.me === a.me && b.runsRemaining > a.runsRemaining) return b;
-      return a;
+      if (b.me !== a.me) return b.me > a.me ? b : a;
+      // ME tied — prefer non-BPO
+      if (a.isBPO !== b.isBPO) return a.isBPO ? b : a;
+      // Both BPCs or both BPOs — prefer more runs (BPOs are infinite so a tie)
+      return b.runsRemaining > a.runsRemaining ? b : a;
     });
     return best.me;
   }
@@ -8541,12 +8543,17 @@ function bpcMEAt(bpTypeID, locationID) {
   // UI's bpcStatus helper picks 'bestElse' for display — keeping math and
   // UI in sync so the tool doesn't silently drop ME when the BPC is stored
   // at a different station than where the job runs.
+  //
+  // Same tiebreak as above: prefer non-BPO BPCs when ME is equal. This
+  // doesn't change the ME number returned (BPCs from a researched BPO
+  // inherit the same ME) but keeps the math consistent with the UI
+  // display pointer, which also prefers BPCs.
   const allBpcs = getBPCs(bpTypeID);
   if (allBpcs.length === 0) return null;
   const best = allBpcs.reduce((a, b) => {
-    if (b.me > a.me) return b;
-    if (b.me === a.me && b.runsRemaining > a.runsRemaining) return b;
-    return a;
+    if (b.me !== a.me) return b.me > a.me ? b : a;
+    if (a.isBPO !== b.isBPO) return a.isBPO ? b : a;
+    return b.runsRemaining > a.runsRemaining ? b : a;
   });
   return best.me;
 }
@@ -8779,9 +8786,20 @@ function bpcStatus(bpTypeID, cyclesNeeded, relevantLocationID, activity) {
   const elsewhereBPCs = bpcsElsewhere(bpTypeID, relevantLocationID);
   const elsewhereRuns = runsFromBucket(elsewhereBPCs);
   if (localBPCs.length === 0) {
-    // Owned but wrong location — pick "best elsewhere" preferring BPO
-    const bestElse = elsewhereBPCs.find(b => b.isBPO)
-                  || elsewhereBPCs.reduce((a, b) => (a.runsRemaining >= b.runsRemaining ? a : b));
+    // Owned but wrong location — pick "best elsewhere". For manufacturing,
+    // prefer a real BPC (non-BPO) over the BPO itself: BPOs can only run
+    // one parallel job at a time and are typically kept in a research hub,
+    // not moved. A BPC at a closer station is more actionable for the user.
+    // Fall back to the BPO only if no BPCs exist.
+    //
+    // ME inheritance: BPCs copied from a ME-researched BPO inherit the same
+    // ME, so preferring a BPC here doesn't lose any ME — the best BPC has
+    // the same ME as the BPO it was copied from.
+    const realBPCs = elsewhereBPCs.filter(b => !b.isBPO);
+    const bestElse = realBPCs.length > 0
+      ? realBPCs.reduce((a, b) => (a.runsRemaining >= b.runsRemaining ? a : b))
+      : elsewhereBPCs.find(b => b.isBPO)
+        || elsewhereBPCs.reduce((a, b) => (a.runsRemaining >= b.runsRemaining ? a : b));
     // For manufacturing, if the ONLY copies elsewhere are BPOs, flag bpoOnly
     // so the UI can tell the user they'll need to copy the BPO into BPCs
     // before parallel jobs can run (even after moving it).
@@ -8802,9 +8820,14 @@ function bpcStatus(bpTypeID, cyclesNeeded, relevantLocationID, activity) {
   const bestLocal = bestBPCAt(bpTypeID, relevantLocationID);
   const localRuns = runsFromBucket(localBPCs);
   const shortfall = Number.isFinite(localRuns) ? Math.max(0, cyclesNeeded - localRuns) : 0;
-  const bestElse = elsewhereBPCs.length > 0
-    ? (elsewhereBPCs.find(b => b.isBPO) || elsewhereBPCs.reduce((a, b) => (a.runsRemaining >= b.runsRemaining ? a : b)))
-    : null;
+  // Prefer real BPCs over BPO for the 'elsewhere' pointer (see longer comment
+  // on the no-local branch above for rationale).
+  const realElsewhereBPCs = elsewhereBPCs.filter(b => !b.isBPO);
+  const bestElse = realElsewhereBPCs.length > 0
+    ? realElsewhereBPCs.reduce((a, b) => (a.runsRemaining >= b.runsRemaining ? a : b))
+    : elsewhereBPCs.length > 0
+      ? (elsewhereBPCs.find(b => b.isBPO) || elsewhereBPCs.reduce((a, b) => (a.runsRemaining >= b.runsRemaining ? a : b)))
+      : null;
   const bpoOnly = isManufacturing && localBPCs.every(b => b.isBPO);
   return {
     owned: true,
