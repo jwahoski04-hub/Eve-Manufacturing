@@ -8088,7 +8088,7 @@ function renderMainApp() {
                         <span class="project-loc-icon">🏗</span>${locShort(mfgLoc)}
                       </div>
                     ` : ''}
-                    ${rxnLoc && rxnLoc !== mfgLoc ? `
+                    ${rxnLoc ? `
                       <div class="project-loc">
                         <span class="project-loc-icon">⚗</span>${locShort(rxnLoc)}
                       </div>
