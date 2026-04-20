@@ -5784,11 +5784,20 @@ const typeCatalog = (() => {
     return set;
   }
 
-  // Parse Fuzzworks invTypes.csv. We only need typeID, typeName, published.
+  // Parse Fuzzworks invTypes.csv. We only need typeID, typeName.
   // Column layout: typeID, groupID, typeName, description, mass, volume, capacity,
   //                portionSize, raceID, basePrice, published, marketGroupID, ...
   // Names can contain commas (e.g. "Small, Medium Plate") and quotes — we do a
   // minimal quote-aware CSV parser that handles those.
+  //
+  // NOTE: We intentionally do NOT filter on published=1. The SDE sometimes
+  // marks legitimate T2 and T3 ships (e.g. Rook typeID 11959, Loki typeID
+  // 29990) as published=0 even though they are fully playable and
+  // manufacturable. The manufacturableSet filter applied in search() is the
+  // authoritative gate — if something can be produced by a blueprint
+  // (activityID 1 or 11), it belongs in the picker regardless of its
+  // published flag. Unpublished items without blueprints naturally filter
+  // out via the manufacturable set.
   function parseCSV(text) {
     const lines = text.split(/\r?\n/);
     if (lines.length < 2) return [];
@@ -5798,13 +5807,10 @@ const typeCatalog = (() => {
       const line = lines[i];
       if (!line) continue;
       const cols = csvSplit(line);
-      if (cols.length < 11) continue;
+      if (cols.length < 3) continue;
       const id = Number(cols[0]);
       const name = cols[2];
-      const published = cols[10];
       if (!id || !name) continue;
-      // Skip unpublished types — these clutter search with legacy/internal items
-      if (published !== '1') continue;
       out.push({ id, name, nameLower: name.toLowerCase() });
     }
     return out;
