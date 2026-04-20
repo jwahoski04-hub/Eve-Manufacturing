@@ -4643,23 +4643,336 @@ const esiApi = (() => {
 })();
 
 // =====================================================================
-// PROJECT CATALOG — each project = one product output
-// All typeIDs and material quantities verified against eveonlineships.com
+// RIG CATALOG — manufacturing ME rigs and structure role bonuses
 // =====================================================================
+// Static data for EVE's manufacturing rig system. Increments 2-5 consume
+// this data to compute effective material bonuses per product category.
+//
+// Two pieces live here:
+//
+//   STRUCTURE_TYPES — base role bonuses (apply to ALL manufacturing at
+//                     the structure, regardless of what's fitted)
+//   RIG_CATALOG     — fittable rigs with category-targeted bonuses
+//
+// Design decisions (locked in):
+// * Short name only (no full in-game name, no abbreviation)
+// * Security multipliers live in effectiveMfgBonus() helper, not here
+// * Category vocabulary: smallShip, mediumShip, largeShip, capitalShip,
+//   advancedSmallShip, advancedMediumShip, advancedLargeShip, component,
+//   advancedComponent, equipment, ammunition
+//
+// Scope for Increment 1 — manufacturing ME rigs only. TE rigs, research
+// rigs, invention rigs, and reaction rigs come in Phase 2.
 // =====================================================================
-// LOCATIONS — canonical registry of stations/structures the character uses
-// =====================================================================
-// =====================================================================
-// LOCATIONS — canonical registry of stations/structures the character uses
-// Each location includes its structure type and material-efficiency bonuses.
-// Bonuses are multipliers applied AFTER BPC ME:
-//   finalQty = ceil(baseQty × runs × (1 − bpME/100) × mfgBonus)
-//   finalQty = ceil(baseQty × runs × reactionBonus) for reactions (no ME on formulas)
-// NPC stations have no bonus (bonus = 1.0).
-// Engineering Complexes (Raitaru/Azbel/Sotiyo) give -1% manufacturing materials.
-// Refineries (Athanor/Tatara) give -0% reaction materials by default but reaction RIGS
-// can add up to -2.4%. We model a single combined "reactionMat" bonus per structure.
-// =====================================================================
+
+// Structure role bonuses — what each structure type provides BEFORE rigs.
+// Sources: EVE Online wiki, CCP structure info panels.
+//
+// Fields:
+//   name          — display label
+//   rigSlots      — number of rig slots available on this structure
+//   mfgMaterial   — base material bonus (multiplier; 0.99 = -1%)
+//   mfgTime       — base time bonus (multiplier; not used yet in Increment 1)
+//   reactionMat   — base reaction material bonus (for refineries)
+//   category      — 'engineering' | 'refinery' | 'npc'
+//
+// NPC stations have no bonuses — listed here only so the bonus lookup has
+// something consistent to fall back to for every structure type.
+const STRUCTURE_TYPES = {
+  raitaru:     { name: 'Raitaru',      rigSlots: 2, mfgMaterial: 0.99, mfgTime: 0.85, reactionMat: 1.00, category: 'engineering' },
+  azbel:       { name: 'Azbel',        rigSlots: 2, mfgMaterial: 0.99, mfgTime: 0.80, reactionMat: 1.00, category: 'engineering' },
+  sotiyo:      { name: 'Sotiyo',       rigSlots: 3, mfgMaterial: 0.99, mfgTime: 0.70, reactionMat: 1.00, category: 'engineering' },
+  athanor:     { name: 'Athanor',      rigSlots: 2, mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 0.98, category: 'refinery' },
+  tatara:      { name: 'Tatara',       rigSlots: 3, mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 0.976, category: 'refinery' },
+  npc_station: { name: 'NPC Station',  rigSlots: 0, mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 1.00, category: 'npc' },
+  keepstar:    { name: 'Keepstar',     rigSlots: 3, mfgMaterial: 0.99, mfgTime: 0.75, reactionMat: 1.00, category: 'engineering' },
+};
+
+// Rig catalog — fittable rigs with category-targeted material bonuses.
+//
+// Fields:
+//   id              — stable key (used in rigSlots storage)
+//   typeId          — EVE SDE typeID (reference; useful for ESI later)
+//   name            — short display name
+//   activity        — 'manufacturing' (reactions, research, etc. come later)
+//   bonusType       — 'material' (time/cost come later)
+//   basePercent     — hisec bonus amount (negative = reduction)
+//                     e.g. -2.0 means "2% material reduction at hisec"
+//                     Multiplied by security factor in the lookup function
+//   categories      — array of product categories this rig affects
+//   tier            — 1 (T1) or 2 (T2)
+//   fits            — array of structure type keys this rig can be fitted to
+//
+// basePercent values come from the rig item's Dogma attributes in the SDE.
+// Security multipliers (1.0× hisec, 1.9× lowsec, 2.1× null/low-wh, 2.6× high-wh)
+// are applied in effectiveMfgBonus(), not stored here — every rig uses the same curve.
+//
+// Example stacking (nullsec):
+//   Basic Large Ship ME II basePercent = -2.4
+//   × 2.1 nullsec multiplier = -5.04% effective
+//   Panther at Azbel+this rig: 0.99 × (1 - 0.0504) = 0.9401 combined
+const RIG_CATALOG = {
+  // ─── Basic Small Ship ME ─────────────────────────────────────────────
+  'rig_bssme_1': {
+    id: 'rig_bssme_1', typeId: 37155, name: 'Basic Small Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['smallShip'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_bssme_2': {
+    id: 'rig_bssme_2', typeId: 37156, name: 'Basic Small Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['smallShip'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  // ─── Basic Medium Ship ME ────────────────────────────────────────────
+  'rig_bmsme_1': {
+    id: 'rig_bmsme_1', typeId: 37157, name: 'Basic Medium Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['mediumShip'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_bmsme_2': {
+    id: 'rig_bmsme_2', typeId: 37158, name: 'Basic Medium Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['mediumShip'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  // ─── Basic Large Ship ME ─────────────────────────────────────────────
+  // This is the rig family that affects your Panther (Black Ops battleship
+  // is a large ship). W-IX39's T2 variant gives -2.4% × 2.1 = -5.04% in null.
+  'rig_blsme_1': {
+    id: 'rig_blsme_1', typeId: 37159, name: 'Basic Large Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['largeShip'], tier: 1,
+    fits: ['azbel', 'sotiyo'],
+  },
+  'rig_blsme_2': {
+    id: 'rig_blsme_2', typeId: 37160, name: 'Basic Large Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['largeShip'], tier: 2,
+    fits: ['azbel', 'sotiyo'],
+  },
+
+  // ─── Capital Ship ME (Sotiyo only) ───────────────────────────────────
+  'rig_capsme_1': {
+    id: 'rig_capsme_1', typeId: 43865, name: 'Capital Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['capitalShip'], tier: 1,
+    fits: ['sotiyo'],
+  },
+  'rig_capsme_2': {
+    id: 'rig_capsme_2', typeId: 43866, name: 'Capital Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['capitalShip'], tier: 2,
+    fits: ['sotiyo'],
+  },
+
+  // ─── Advanced Small Ship ME (T2 frigs/destroyers) ────────────────────
+  'rig_assme_1': {
+    id: 'rig_assme_1', typeId: 43867, name: 'Advanced Small Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['advancedSmallShip'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_assme_2': {
+    id: 'rig_assme_2', typeId: 43868, name: 'Advanced Small Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['advancedSmallShip'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  // ─── Advanced Medium Ship ME (T2 cruisers, strategic cruisers) ───────
+  'rig_amsme_1': {
+    id: 'rig_amsme_1', typeId: 43869, name: 'Advanced Medium Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['advancedMediumShip'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_amsme_2': {
+    id: 'rig_amsme_2', typeId: 43870, name: 'Advanced Medium Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['advancedMediumShip'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  // ─── Advanced Large Ship ME (T2 battleships — Marauders, Black Ops) ──
+  // The Panther is a Black Ops, which is T2. It would ALSO benefit from an
+  // Advanced Large Ship ME rig in addition to (or instead of) the Basic one.
+  // W-IX39 appears to have the Basic Large Ship rig based on the screenshot,
+  // but if a station has both, the walker needs to handle multi-rig stacking.
+  'rig_alsme_1': {
+    id: 'rig_alsme_1', typeId: 43871, name: 'Advanced Large Ship ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['advancedLargeShip'], tier: 1,
+    fits: ['azbel', 'sotiyo'],
+  },
+  'rig_alsme_2': {
+    id: 'rig_alsme_2', typeId: 43872, name: 'Advanced Large Ship ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['advancedLargeShip'], tier: 2,
+    fits: ['azbel', 'sotiyo'],
+  },
+
+  // ─── Components ──────────────────────────────────────────────────────
+  // Basic Components rig — for T1 component manufacturing (Construction
+  // Components, Fernite Carbide plates, etc.). Distinct from ship rigs.
+  'rig_cme_1': {
+    id: 'rig_cme_1', typeId: 37154, name: 'Basic Components ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['component'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_cme_2': {
+    id: 'rig_cme_2', typeId: 43860, name: 'Basic Components ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['component'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  'rig_acme_1': {
+    id: 'rig_acme_1', typeId: 43861, name: 'Advanced Components ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['advancedComponent'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_acme_2': {
+    id: 'rig_acme_2', typeId: 43862, name: 'Advanced Components ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['advancedComponent'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  // ─── Equipment (modules) ─────────────────────────────────────────────
+  'rig_eqme_1': {
+    id: 'rig_eqme_1', typeId: 37163, name: 'Equipment ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['equipment'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_eqme_2': {
+    id: 'rig_eqme_2', typeId: 37164, name: 'Equipment ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['equipment'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+
+  // ─── Ammunition ──────────────────────────────────────────────────────
+  'rig_amme_1': {
+    id: 'rig_amme_1', typeId: 37165, name: 'Ammunition ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['ammunition'], tier: 1,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+  'rig_amme_2': {
+    id: 'rig_amme_2', typeId: 37166, name: 'Ammunition ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['ammunition'], tier: 2,
+    fits: ['raitaru', 'azbel', 'sotiyo'],
+  },
+};
+
+// Product category classifier — maps an EVE typeID (via its groupId) to
+// one of our rig category buckets. Used by the bonus lookup to figure out
+// which fitted rigs apply to a given product.
+//
+// Source: EVE SDE invGroups table. Listed here are only the groups that
+// manufacturing can produce. Groups not listed → no bucket → no rig bonus
+// beyond the structure's role bonus.
+//
+// The classifier is keyed by GROUP ID (not category ID) because EVE's rig
+// targeting is group-level. "Frigate" is a group; "Ship" is a category.
+//
+// Increment 3 uses this when computing the effective bonus:
+//   productBucket = PRODUCT_CATEGORY_MAP[groupId]
+//   matchingRigs = rigs.filter(r => r.categories.includes(productBucket))
+const PRODUCT_CATEGORY_MAP = {
+  // ── Ships (category 6) — grouped by size/tech level ───────────────────
+  // T1 small ships
+  25:   'smallShip',       // Frigate
+  237:  'smallShip',       // Rookie Ship
+  31:   'smallShip',       // Shuttle
+  420:  'smallShip',       // Destroyer
+  463:  'smallShip',       // Mining Barge
+  543:  'smallShip',       // Exhumer (T2 mining barge — but rig-wise often a small ship)
+  // T1 medium ships
+  26:   'mediumShip',      // Cruiser
+  28:   'mediumShip',      // Industrial
+  419:  'mediumShip',      // Combat Battlecruiser
+  540:  'mediumShip',      // Attack Battlecruiser (like Oracle, Naga — still medium)
+  // T1 large ships
+  27:   'largeShip',       // Battleship
+  513:  'largeShip',       // Freighter
+  // T1 capital ships
+  485:  'capitalShip',     // Dreadnought
+  547:  'capitalShip',     // Carrier
+  883:  'capitalShip',     // Capital Industrial Ship (Rorqual)
+  902:  'capitalShip',     // Jump Freighter
+  941:  'capitalShip',     // Industrial Command Ship (Orca)
+  4594: 'capitalShip',     // Lancer Dreadnought
+
+  // T2 small ships
+  324:  'advancedSmallShip', // Assault Frigate
+  830:  'advancedSmallShip', // Covert Ops
+  831:  'advancedSmallShip', // Interceptor
+  834:  'advancedSmallShip', // Stealth Bomber
+  893:  'advancedSmallShip', // Electronic Attack Ship
+  1527: 'advancedSmallShip', // Logistics Frigate
+  1534: 'advancedSmallShip', // Command Destroyer
+  1305: 'advancedSmallShip', // Tactical Destroyer
+  1283: 'advancedSmallShip', // Interdictor (T2 destroyer)
+  // T2 medium ships
+  358:  'advancedMediumShip', // Heavy Assault Cruiser
+  832:  'advancedMediumShip', // Logistics Cruiser
+  833:  'advancedMediumShip', // Force Recon Ship
+  894:  'advancedMediumShip', // Heavy Interdiction Cruiser
+  906:  'advancedMediumShip', // Combat Recon Ship
+  963:  'advancedMediumShip', // Strategic Cruiser
+  540:  'advancedMediumShip', // (already listed as mediumShip — rigs differ — see note below)
+  1201: 'advancedMediumShip', // Attack Battlecruiser (T2? verify)
+  // T2 large ships
+  900:  'advancedLargeShip', // Marauder
+  898:  'advancedLargeShip', // Black Ops (← PANTHER lives here)
+  // T2 capital
+  485:  'capitalShip',     // (T2 capitals also use the Capital Ship rig family)
+  659:  'capitalShip',     // Supercarrier
+  30:   'capitalShip',     // Titan
+
+  // ── Components / Modules (category 4 Material, 7 Module, 17 Commodity) ─
+  // T1 construction components (Fernite Carbide plates, etc.)
+  334:  'component',       // Construction Components (generic)
+  913:  'component',       // Composite Reaction intermediate — treat as component
+  // T2 advanced components
+  965:  'advancedComponent', // T2 Advanced Components
+  // Modules / equipment (category 7 — huge variety)
+  // Most modules fall under group 7 and its children; we treat category-level.
+  // Rather than listing every module group, effectiveMfgBonus falls back to
+  // 'equipment' for category 7 products not otherwise classified.
+
+  // ── Charges / Ammo (category 8) ──────────────────────────────────────
+  // Similar to modules — we'll handle this at category level in the lookup.
+  // No explicit group entries here; the lookup treats category 8 as 'ammunition'.
+};
+
+// Category-level fallback — when a product's group isn't in PRODUCT_CATEGORY_MAP
+// but we know its ESI categoryId, we can still classify it. This is used as
+// a fallback in effectiveMfgBonus() so we don't have to enumerate every module
+// and ammo type in PRODUCT_CATEGORY_MAP.
+const CATEGORY_FALLBACK = {
+  7: 'equipment',    // Module
+  8: 'ammunition',   // Charge
+  18: 'equipment',   // Drone (treated as equipment for rig purposes)
+  // 6 (Ship) intentionally omitted — ships MUST be classified by group,
+  //   because "Cruiser" and "Strategic Cruiser" are both category 6 but
+  //   use different rigs (mediumShip vs advancedMediumShip).
+  // 4 (Material) intentionally omitted — some materials are raw ores
+  //   (no bucket), some are manufacturable components. Must go through
+  //   PRODUCT_CATEGORY_MAP's group-level entries.
+};
+
+
 const LOCATIONS = {
   'loc-1dq':    { name: '1DQ1-A III - Moon 1 - Keepstar',                        shortName: '1DQ1 Keepstar', system: '1DQ1-A',  region: 'Delve',       security: -0.5, type: 'keepstar',    mfgMat: 0.99, reactionMat: 1.00 },
   'loc-sotiyo': { name: 'Y-MPWL VII - Moon 2 - Goonswarm Production Sotiyo',     shortName: 'YMPWL Sotiyo',   system: 'Y-MPWL',  region: 'Delve',       security: -0.5, type: 'sotiyo',      mfgMat: 0.99, reactionMat: 1.00 },
