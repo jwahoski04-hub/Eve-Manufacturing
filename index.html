@@ -7050,6 +7050,9 @@ function bindEmptyStateHandlers() {
   if (state.newProjectModal.open) {
     wireNewProjectModalHandlers();
   }
+  if (state.rigPickerModal.open) {
+    wireRigPickerModalHandlers();
+  }
   // Import button is useful here to restore a backup before creating anything
   const importBtn = document.getElementById('import-projects-btn');
   if (importBtn) importBtn.onclick = () => importBackupFromFile();
@@ -11554,6 +11557,9 @@ function bindHandlers(project) {
 
   // All modal-internal handlers (close, name input, pick, runs, selects, create)
   wireNewProjectModalHandlers();
+  if (state.rigPickerModal.open) {
+    wireRigPickerModalHandlers();
+  }
 }
 
 // Wire up interactions for the New Project modal when it's open. Extracted so
@@ -11688,6 +11694,196 @@ function wireNewProjectModalHandlers() {
       setState({ activeProjectId: id });
     });
   });
+}
+
+// =====================================================================
+// Rig Picker modal — event wiring (Increment 5d)
+// =====================================================================
+//
+// Attaches event listeners to elements rendered by renderRigPickerModal.
+// Called once per render cycle (from bindHandlers / bindEmptyStateHandlers)
+// when state.rigPickerModal.open is true. The listeners mutate
+// state.rigPickerModal.workingConfig in place and call render() to reflect
+// changes in the preview panel.
+//
+// Handlers wired here:
+//   - Close (X, Cancel, overlay click)   → discards workingConfig
+//   - Structure type dropdown             → updates workingConfig, resizes slot list
+//   - System security input               → live-updates workingConfig
+//   - Rig slot dropdowns                  → update workingConfig.rigSlots[i]
+//   - Save button                         → validates, then commits to
+//                                            state.stationConfigs; shows
+//                                            confirmation if overwriting
+//
+// The two-step Save-then-Confirm flow: if the station already has a saved
+// config, the first click sets confirmingSave=true (which changes the
+// button label to "Confirm Overwrite"). The second click actually commits.
+// If the user cancels or changes any field in between, confirmingSave
+// resets so the confirmation is always "fresh" at save time.
+// =====================================================================
+function wireRigPickerModalHandlers() {
+  // Close handlers — resets workingConfig so nothing leaks to the next open
+  const closeRigPicker = () => {
+    state.rigPickerModal = {
+      open: false,
+      stationID: null,
+      workingConfig: null,
+      confirmingSave: false,
+      error: '',
+    };
+    render();
+  };
+  document.querySelectorAll('[data-rp-close]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeRigPicker();
+    });
+  });
+  document.querySelectorAll('[data-rp-overlay]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      // Only close when clicking the overlay backdrop itself, not children
+      if (e.target === el) closeRigPicker();
+    });
+  });
+
+  // Any field change resets the confirming-overwrite state. If the user was
+  // about to confirm an overwrite and then changes their mind and tweaks a
+  // field, we want the next Save click to re-enter the confirmation flow
+  // (not silently commit the new changes).
+  const resetConfirm = () => {
+    if (state.rigPickerModal.confirmingSave) {
+      state.rigPickerModal.confirmingSave = false;
+    }
+  };
+
+  // Structure type dropdown — changing structure may reduce/expand rig slots.
+  // We trim rigSlots to the new slot count and drop any rigs that don't fit
+  // the new structure (e.g. Capital Ship rig selected, then user switches
+  // from Sotiyo to Azbel — the rig would no longer fit).
+  const structSelect = document.querySelector('[data-rp-structure]');
+  if (structSelect) {
+    structSelect.addEventListener('change', (e) => {
+      const newType = e.target.value || null;
+      const cfg = state.rigPickerModal.workingConfig || { rigSlots: [] };
+      cfg.structureType = newType;
+
+      // Recompute slot count and prune incompatible rigs
+      const newStruct = newType ? STRUCTURE_TYPES[newType] : null;
+      const newSlotCount = newStruct ? newStruct.rigSlots : 0;
+      const existingSlots = cfg.rigSlots || [];
+      cfg.rigSlots = existingSlots.slice(0, newSlotCount).map(rigId => {
+        if (!rigId) return '';
+        const rig = RIG_CATALOG[rigId];
+        // If the rig doesn't fit the new structure, clear it
+        return (rig && rig.fits.includes(newType)) ? rigId : '';
+      });
+
+      state.rigPickerModal.workingConfig = cfg;
+      resetConfirm();
+      render();
+    });
+  }
+
+  // System security input — live-update. Accepts floats like -0.1 or 0.4.
+  // Empty input leaves systemSecurity null so the rig multiplier logic uses
+  // its safe default (1.0× = hisec equivalent).
+  const secInput = document.querySelector('[data-rp-security]');
+  if (secInput) {
+    secInput.addEventListener('input', (e) => {
+      const raw = e.target.value.trim();
+      const cfg = state.rigPickerModal.workingConfig || {};
+      cfg.systemSecurity = raw === '' ? null : parseFloat(raw);
+      state.rigPickerModal.workingConfig = cfg;
+      resetConfirm();
+      render();
+      // Restore focus & cursor after re-render (otherwise the user loses
+      // focus on every keystroke)
+      requestAnimationFrame(() => {
+        const el = document.querySelector('[data-rp-security]');
+        if (el) {
+          el.focus();
+          const len = el.value.length;
+          try { el.setSelectionRange(len, len); } catch (_) {}
+        }
+      });
+    });
+  }
+
+  // Rig slot dropdowns — each <select data-rp-slot="N"> updates rigSlots[N]
+  document.querySelectorAll('[data-rp-slot]').forEach(sel => {
+    sel.addEventListener('change', (e) => {
+      const slotIndex = parseInt(e.target.dataset.rpSlot, 10);
+      const cfg = state.rigPickerModal.workingConfig || { rigSlots: [] };
+      if (!Array.isArray(cfg.rigSlots)) cfg.rigSlots = [];
+      // Grow the array to at least slotIndex+1 (fills with empty strings)
+      while (cfg.rigSlots.length <= slotIndex) cfg.rigSlots.push('');
+      cfg.rigSlots[slotIndex] = e.target.value || '';
+      state.rigPickerModal.workingConfig = cfg;
+      resetConfirm();
+      render();
+    });
+  });
+
+  // Save button — with two-step confirmation for overwriting existing configs.
+  const saveBtn = document.querySelector('[data-rp-save]');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => {
+      const m = state.rigPickerModal;
+      const cfg = m.workingConfig;
+
+      // Guard: must have structure type (render should've disabled button
+      // but belt-and-suspenders in case the DOM was manually manipulated)
+      if (!cfg || !cfg.structureType) {
+        state.rigPickerModal.error = 'Select a structure type before saving.';
+        render();
+        return;
+      }
+
+      const hasExisting = !!state.stationConfigs[m.stationID];
+
+      // Overwrite protection — first click on an existing config primes
+      // the confirmation; second click commits. Fresh configs (no existing
+      // entry) save immediately, no confirmation.
+      if (hasExisting && !m.confirmingSave) {
+        state.rigPickerModal.confirmingSave = true;
+        state.rigPickerModal.error = '';
+        render();
+        return;
+      }
+
+      // Normalize before saving — drop empty slot strings so stored rigSlots
+      // is just the list of actually-fitted rig IDs. Keep systemSecurity as
+      // null if unset (effectiveMfgBonus treats null safely).
+      const normalizedConfig = {
+        structureType: cfg.structureType,
+        rigSlots: (cfg.rigSlots || []).filter(r => r),
+        systemSecurity: cfg.systemSecurity != null && !Number.isNaN(cfg.systemSecurity)
+          ? cfg.systemSecurity
+          : null,
+      };
+
+      state.stationConfigs[m.stationID] = normalizedConfig;
+      saveStationConfigs();
+
+      // Invalidate any project-need caches that might use this station's
+      // multiplier — forces the walker to re-run with the new config on
+      // the next render. The cache is a WeakMap keyed by project, so we
+      // delete per-project (can't reassign a const WeakMap).
+      try {
+        for (const p of PROJECTS) _projectNeedCache.delete(p);
+      } catch (_) { /* cache may be empty or PROJECTS unavailable */ }
+
+      // Close modal
+      state.rigPickerModal = {
+        open: false,
+        stationID: null,
+        workingConfig: null,
+        confirmingSave: false,
+        error: '',
+      };
+      render();
+    });
+  }
 }
 
 window.setState = setState;
