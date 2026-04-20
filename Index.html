@@ -333,12 +333,42 @@
     padding: 6px 14px;
     background: #030507;
     border-bottom: 1px solid #1a2028;
+    position: relative;
   }
   .topbar-left { display: flex; align-items: center; gap: 10px; }
   .topbar-diamond { width: 12px; height: 12px; background: linear-gradient(135deg, #c8a068, #6a4828); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
   .topbar-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #8a7048; }
   .topbar-right { display: flex; align-items: center; gap: 14px; font-size: 11px; color: #6c8592; }
   .wallet { color: #c9b676; font-family: 'IBM Plex Mono', monospace; }
+  /* BACK TO HUB pill — centered on topbar, absolute-positioned to ignore left/right group widths */
+  .back-hub {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border: 1px solid #2a4050;
+    border-radius: 3px;
+    background: #0a0f13;
+    color: #8ba4b3;
+    text-decoration: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .back-hub:hover {
+    border-color: #c9a868;
+    color: #c9a868;
+    background: rgba(201, 168, 104, 0.08);
+    box-shadow: 0 0 12px rgba(201, 168, 104, 0.18);
+  }
+  .back-hub-arrow { font-size: 11px; line-height: 1; }
   /* Small subtle buttons in the topbar (Export / Import) */
   .topbar-btn {
     padding: 3px 10px;
@@ -6016,6 +6046,7 @@ function renderEmptyProjectsState() {
         <button class="topbar-btn" id="import-projects-btn" title="Restore projects and settings from a previously downloaded backup">Import</button>
         <button class="help-btn" id="help-btn" onclick="openHelp()" title="How to use this tool (Esc to close)" aria-label="Open help"><span class="help-btn-glyph">?</span>HELP</button>
       </div>
+      <a class="back-hub" href="https://jwahoski04-hub.github.io/eve-tools/" title="Return to Tool Suite"><span class="back-hub-arrow">◀</span><span>BACK TO HUB</span></a>
       <div class="topbar-right">
         ${renderCharactersBar()}
       </div>
@@ -6351,6 +6382,7 @@ function renderMainApp() {
           </span>
         ` : ''}
       </div>
+      <a class="back-hub" href="https://jwahoski04-hub.github.io/eve-tools/" title="Return to Tool Suite"><span class="back-hub-arrow">◀</span><span>BACK TO HUB</span></a>
       <div class="topbar-right">
         ${renderCharactersBar()}
       </div>
