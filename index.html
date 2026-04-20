@@ -2641,6 +2641,12 @@
     color: #c0d4e5;
     border-style: solid;
   }
+  .stations-rig-badge.npc {
+    background: rgba(90, 100, 120, 0.08);
+    border: 1px solid rgba(90, 100, 120, 0.35);
+    color: #5a6a82;
+    cursor: default;
+  }
   .stations-clear-btn {
     width: 100%;
     padding: 7px;
@@ -10184,31 +10190,38 @@ function renderIndustryStationsTab(project) {
             // Rig config badge — shows whether this station has structured rig
             // data. Configured = "Azbel · 1/2 rigs" (amber, clickable to edit);
             // unconfigured = "Configure" (dim, clickable to open empty picker).
-            // NPC stations are filtered out because they have no rigs.
+            // NPC stations show a non-clickable "NPC · no rigs" indicator so
+            // users understand why rigs can't be set (NPC stations lack rig
+            // slots entirely — they're CCP-operated fixed facilities).
             const rigCfg = state.stationConfigs[id];
             const structInfo = rigCfg ? STRUCTURE_TYPES[rigCfg.structureType] : null;
             const isNpcStation = loc.type === 'npc_station';
             let rigBadgeHtml = '';
-            if (!isNpcStation) {
-              if (rigCfg && structInfo) {
-                const numFilled = (rigCfg.rigSlots || []).length;
-                const total = structInfo.rigSlots;
-                rigBadgeHtml = `
-                  <span class="stations-rig-badge configured"
-                        data-edit-rigs="${escapeHtml(id)}"
-                        title="Click to edit rigs">
-                    ${escapeHtml(structInfo.name)} · ${numFilled}/${total} rigs
-                  </span>
-                `;
-              } else {
-                rigBadgeHtml = `
-                  <span class="stations-rig-badge unconfigured"
-                        data-edit-rigs="${escapeHtml(id)}"
-                        title="Click to configure structure type and rigs">
-                    Configure
-                  </span>
-                `;
-              }
+            if (isNpcStation) {
+              rigBadgeHtml = `
+                <span class="stations-rig-badge npc"
+                      title="NPC stations have no rig slots — bonuses are fixed at 0%">
+                  NPC · no rigs
+                </span>
+              `;
+            } else if (rigCfg && structInfo) {
+              const numFilled = (rigCfg.rigSlots || []).length;
+              const total = structInfo.rigSlots;
+              rigBadgeHtml = `
+                <span class="stations-rig-badge configured"
+                      data-edit-rigs="${escapeHtml(id)}"
+                      title="Click to edit rigs">
+                  ${escapeHtml(structInfo.name)} · ${numFilled}/${total} rigs
+                </span>
+              `;
+            } else {
+              rigBadgeHtml = `
+                <span class="stations-rig-badge unconfigured"
+                      data-edit-rigs="${escapeHtml(id)}"
+                      title="Click to configure structure type and rigs">
+                  Configure
+                </span>
+              `;
             }
             // Delete rule: block if this station is used by the CURRENT project
             // for either activity (via override or project default).
@@ -10230,7 +10243,6 @@ function renderIndustryStationsTab(project) {
                   <div class="stations-option-info">
                     <div class="stations-option-name">
                       ${escapeHtml(loc.shortName || id)}
-                      ${isManual ? '<span class="stations-manual-badge">MANUAL</span>' : ''}
                       ${rigBadgeHtml}
                     </div>
                     <div class="stations-option-sub">${escapeHtml(loc.system || '—')} · ${escapeHtml(loc.region || '—')}</div>
