@@ -5486,14 +5486,28 @@ const esiApi = (() => {
 //
 // NPC stations have no bonuses — listed here only so the bonus lookup has
 // something consistent to fall back to for every structure type.
+//
+// Rig slot counts verified against EVERef dogma attribute 1137 (rigSlots).
+// Every Upwell structure has 3 rig slots; earlier versions of this catalog
+// incorrectly listed Raitaru/Azbel/Athanor at 2 slots. The rigSize field
+// (medium/large/x-large) determines which rig size class fits — M-Set
+// rigs for medium, L-Set for large, XL-Set for x-large.
+//
+// Sources:
+//   Raitaru  (35825) → 3 slots, medium rig size
+//   Azbel    (35826) → 3 slots, large rig size
+//   Sotiyo   (35827) → 3 slots, x-large rig size
+//   Athanor  (35835) → 3 slots, medium rig size
+//   Tatara   (35836) → 3 slots, large rig size
+//   Keepstar (35834) → 3 slots, x-large rig size (citadel, not engineering)
 const STRUCTURE_TYPES = {
-  raitaru:     { name: 'Raitaru',      rigSlots: 2, mfgMaterial: 0.99, mfgTime: 0.85, reactionMat: 1.00, category: 'engineering' },
-  azbel:       { name: 'Azbel',        rigSlots: 2, mfgMaterial: 0.99, mfgTime: 0.80, reactionMat: 1.00, category: 'engineering' },
-  sotiyo:      { name: 'Sotiyo',       rigSlots: 3, mfgMaterial: 0.99, mfgTime: 0.70, reactionMat: 1.00, category: 'engineering' },
-  athanor:     { name: 'Athanor',      rigSlots: 2, mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 0.98, category: 'refinery' },
-  tatara:      { name: 'Tatara',       rigSlots: 3, mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 0.976, category: 'refinery' },
-  npc_station: { name: 'NPC Station',  rigSlots: 0, mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 1.00, category: 'npc' },
-  keepstar:    { name: 'Keepstar',     rigSlots: 3, mfgMaterial: 0.99, mfgTime: 0.75, reactionMat: 1.00, category: 'engineering' },
+  raitaru:     { name: 'Raitaru',      rigSlots: 3, rigSize: 'medium',  mfgMaterial: 0.99, mfgTime: 0.85, reactionMat: 1.00, category: 'engineering' },
+  azbel:       { name: 'Azbel',        rigSlots: 3, rigSize: 'large',   mfgMaterial: 0.99, mfgTime: 0.80, reactionMat: 1.00, category: 'engineering' },
+  sotiyo:      { name: 'Sotiyo',       rigSlots: 3, rigSize: 'xlarge',  mfgMaterial: 0.99, mfgTime: 0.70, reactionMat: 1.00, category: 'engineering' },
+  athanor:     { name: 'Athanor',      rigSlots: 3, rigSize: 'medium',  mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 0.98, category: 'refinery' },
+  tatara:      { name: 'Tatara',       rigSlots: 3, rigSize: 'large',   mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 0.976, category: 'refinery' },
+  npc_station: { name: 'NPC Station',  rigSlots: 0, rigSize: null,      mfgMaterial: 1.00, mfgTime: 1.00, reactionMat: 1.00, category: 'npc' },
+  keepstar:    { name: 'Keepstar',     rigSlots: 3, rigSize: 'xlarge',  mfgMaterial: 0.99, mfgTime: 0.75, reactionMat: 1.00, category: 'engineering' },
 };
 
 // Rig catalog — fittable rigs with category-targeted material bonuses.
