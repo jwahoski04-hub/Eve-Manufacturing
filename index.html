@@ -1028,7 +1028,89 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Smooth collapse/expand animation. 150ms feels responsive without
+       being jarring. Transition width so the content-area flex:1 grows
+       to claim the reclaimed space. */
+    transition: width 150ms ease-out;
+    position: relative;
   }
+  /* Collapsed state — just a narrow rail with a rotated label. The
+     toggle rail element inside handles click-to-expand. */
+  .projects-sidebar.collapsed {
+    width: 28px;
+  }
+  /* Hide the full contents (header + list) when collapsed. Using
+     visibility rather than display:none so CSS transitions stay smooth
+     and the list doesn't re-layout on each toggle. */
+  .projects-sidebar.collapsed .projects-header,
+  .projects-sidebar.collapsed .projects-list {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  /* The vertical toggle rail. Sits on the left edge of the sidebar.
+     When expanded: narrow strip with a chevron pointing right (collapse).
+     When collapsed: full-height rail with rotated "PROJECTS ▸" label.
+     Always clickable; always visible. */
+  .projects-sidebar-toggle {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 28px;
+    background: linear-gradient(to right, #0f1419, #0a0d10);
+    border-right: 1px solid #1a2028;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 4;
+    transition: background 120ms ease-out;
+    font-family: 'IBM Plex Mono', monospace;
+    user-select: none;
+  }
+  .projects-sidebar-toggle:hover {
+    background: linear-gradient(to right, #1a2028, #10161c);
+  }
+  .projects-sidebar-toggle-label {
+    /* Rotated vertical label. Only shown in collapsed state — CSS below
+       hides it when the sidebar is expanded. */
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    color: #8a7048;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .projects-sidebar-toggle-chevron {
+    /* Chevron character that rotates to indicate the direction toggle
+       goes when clicked. Expanded → points right (▸, meaning "collapse
+       to the right"). Collapsed → points left (◂, meaning "expand out
+       to the left"). Both orientations read as "tap to move THIS way." */
+    font-size: 11px;
+    color: #8a7048;
+    margin-top: 6px;
+  }
+  /* When sidebar is EXPANDED, show only a tiny chevron (no label) */
+  .projects-sidebar:not(.collapsed) .projects-sidebar-toggle-label { display: none; }
+  /* When sidebar is COLLAPSED, stack chevron below the label */
+  .projects-sidebar.collapsed .projects-sidebar-toggle {
+    flex-direction: column;
+    padding: 12px 0;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .projects-sidebar.collapsed .projects-sidebar-toggle-chevron {
+    margin-top: 0;
+  }
+  /* Shift the sidebar's actual content right by the toggle width so the
+     rail doesn't overlap the projects list. 28px matches the toggle width. */
+  .projects-sidebar .projects-header,
+  .projects-sidebar .projects-list {
+    margin-left: 28px;
+    transition: opacity 150ms ease-out, visibility 150ms ease-out;
+  }
+
   .projects-header {
     flex-shrink: 0;
     padding: 10px 12px;
@@ -7904,6 +7986,21 @@ let state = {
       return raw ? JSON.parse(raw) : {};
     } catch (e) { return {}; }
   })(),
+  // Projects sidebar collapsed state. When true, the right-hand Projects
+  // sidebar shrinks to a vertical rail (~28px) that can be expanded via
+  // click. Gives narrow viewports back ~280px of quadrant width.
+  //
+  // First-visit default: auto-collapse on viewports <1600px (where it
+  // actually matters) and expand on widescreen where there's plenty of
+  // room. After first toggle, user's explicit preference persists.
+  sidebarCollapsed: (() => {
+    try {
+      const raw = localStorage.getItem('eveIndustry.sidebarCollapsed');
+      if (raw !== null) return raw === '1' || raw === 'true';
+      // First visit: collapse on narrow screens, expand on widescreen.
+      return typeof window !== 'undefined' && window.innerWidth < 1600;
+    } catch (e) { return false; }
+  })(),
   // Manually-added stations — structure IDs the user pasted via Industry Stations tab,
   // even though they have no assets there. These show up in the pickable station list.
   manualStations: (() => {
@@ -7999,6 +8096,13 @@ function saveManualStations() {
 function saveProjectCardExpanded() {
   try {
     localStorage.setItem('eveIndustry.projectCardExpanded', JSON.stringify(state.projectCardExpanded));
+  } catch (e) {}
+}
+// Persist projects-sidebar collapsed state. Stored as '1'/'0' string
+// (not JSON) to avoid any parse mismatch; boolean is sufficient here.
+function saveSidebarCollapsed() {
+  try {
+    localStorage.setItem('eveIndustry.sidebarCollapsed', state.sidebarCollapsed ? '1' : '0');
   } catch (e) {}
 }
 // Persist stationConfigs to localStorage. stationConfigs is a plain object
@@ -9054,7 +9158,18 @@ function renderMainApp() {
       </div>
 
       <!-- ============== RIGHT SIDEBAR: PROJECT LIST ============== -->
-      <div class="projects-sidebar">
+      <div class="projects-sidebar ${state.sidebarCollapsed ? 'collapsed' : ''}">
+        <!-- Vertical toggle rail. Click to expand/collapse. Label shown
+             only when collapsed; chevron shown always to indicate action. -->
+        <button type="button"
+                class="projects-sidebar-toggle"
+                data-toggle-sidebar="1"
+                title="${state.sidebarCollapsed ? 'Expand Projects sidebar' : 'Collapse Projects sidebar'}"
+                aria-label="${state.sidebarCollapsed ? 'Expand Projects sidebar' : 'Collapse Projects sidebar'}"
+                aria-expanded="${state.sidebarCollapsed ? 'false' : 'true'}">
+          <span class="projects-sidebar-toggle-label">Projects ▸</span>
+          <span class="projects-sidebar-toggle-chevron">${state.sidebarCollapsed ? '◂' : '▸'}</span>
+        </button>
         <div class="projects-header">
           <span class="projects-title">Projects</span>
           <span class="projects-count">${PROJECTS.length} ACTIVE</span>
@@ -13338,6 +13453,19 @@ function bindHandlers(project) {
       }
       if (drawerChanged) saveProjectCardExpanded();
       setState(patch);
+    });
+  });
+
+  // Projects sidebar: click the toggle rail to collapse/expand.
+  // Mutates state and re-renders. Persistence via saveSidebarCollapsed.
+  // Uses renderPreservingQuadScroll so Q4's shopping list doesn't jump.
+  document.querySelectorAll('[data-toggle-sidebar]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      state.sidebarCollapsed = !state.sidebarCollapsed;
+      saveSidebarCollapsed();
+      renderPreservingQuadScroll();
     });
   });
 
