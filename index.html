@@ -5633,34 +5633,117 @@ const RIG_CATALOG = {
     fits: ['azbel', 'sotiyo'],
   },
 
-  // ─── Components ──────────────────────────────────────────────────────
-  // Basic Components rig covers BOTH T1 and T2 components (same inclusive
-  // model as Basic Ship rigs). Advanced Components rig is T2-only and
-  // stacks on top of Basic when both are fitted.
-  'rig_cme_1': {
-    id: 'rig_cme_1', typeId: 37154, name: 'Basic Components ME I',
+  // ─── Advanced Components ─────────────────────────────────────────────
+  // IMPORTANT: There is NO "Basic Components" rig for M-Set or L-Set in EVE.
+  // Only the XL-Set Structure and Component rig (Sotiyo, 43704/43705) covers
+  // T1 components. The Advanced Component rig family below covers T2
+  // components, T2 CAPITAL components (group 913), Tools (332), Data
+  // Interfaces (716), T3 components (964), and hybrid tech components.
+  //
+  // L-Set fits large rig slots (Azbel + Sotiyo).
+  // M-Set fits medium rig slots (Raitaru + Azbel).
+  //
+  // Historical note: earlier versions of this catalog had "Basic Components
+  // ME I/II" entries with typeIDs 37154 / 43860 — those typeIDs are actually
+  // M-Set Basic Small Ship ME I (already present as rig_bssme_1) and M-Set
+  // Advanced Medium Ship ME II respectively. Both entries have been removed.
+  'rig_acme_L_1': {
+    id: 'rig_acme_L_1', typeId: 37174, name: 'L-Set Advanced Component ME I',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.0, categories: ['component', 'advancedComponent'], tier: 1,
-    fits: ['raitaru', 'azbel', 'sotiyo'],
+    basePercent: -2.0, categories: ['advancedComponent', 'advancedCapitalComponent'], tier: 1,
+    fits: ['azbel', 'sotiyo'],
   },
-  'rig_cme_2': {
-    id: 'rig_cme_2', typeId: 43860, name: 'Basic Components ME II',
+  'rig_acme_L_2': {
+    id: 'rig_acme_L_2', typeId: 37175, name: 'L-Set Advanced Component ME II',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.4, categories: ['component', 'advancedComponent'], tier: 2,
-    fits: ['raitaru', 'azbel', 'sotiyo'],
+    basePercent: -2.4, categories: ['advancedComponent', 'advancedCapitalComponent'], tier: 2,
+    fits: ['azbel', 'sotiyo'],
+  },
+  'rig_acme_M_1': {
+    id: 'rig_acme_M_1', typeId: 43867, name: 'M-Set Advanced Component ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['advancedComponent', 'advancedCapitalComponent'], tier: 1,
+    fits: ['raitaru', 'azbel'],
+  },
+  'rig_acme_M_2': {
+    id: 'rig_acme_M_2', typeId: 43866, name: 'M-Set Advanced Component ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['advancedComponent', 'advancedCapitalComponent'], tier: 2,
+    fits: ['raitaru', 'azbel'],
+  },
+  // L-Set Thukker Advanced Component ME — faction rig, lowsec-optimized.
+  // Real rig has dual bonuses: -3.7% on Advanced Capital Components only,
+  // -2% on all other T2 components. We model the ENHANCED bonus here (the
+  // interesting part) by restricting categories to advancedCapitalComponent.
+  // A user who fits this rig for regular T2 component production won't see
+  // any bonus in our model — flag that as a known limitation.
+  // Source: EVERef type 45641.
+  'rig_acme_L_thk': {
+    id: 'rig_acme_L_thk', typeId: 45641, name: 'L-Set Thukker Advanced Component ME',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -3.7, categories: ['advancedCapitalComponent'], tier: 1, faction: true,
+    fits: ['azbel', 'sotiyo'],
+    securityCurve: { hisec: 0.1, lowsec: 1.9, null: 0.1, wh: 0.1 },
+  },
+  'rig_acme_M_thk': {
+    id: 'rig_acme_M_thk', typeId: 45640, name: 'M-Set Thukker Advanced Component ME',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -3.7, categories: ['advancedCapitalComponent'], tier: 1, faction: true,
+    fits: ['raitaru', 'azbel'],
+    securityCurve: { hisec: 0.1, lowsec: 1.9, null: 0.1, wh: 0.1 },
   },
 
-  'rig_acme_1': {
-    id: 'rig_acme_1', typeId: 43861, name: 'Advanced Components ME I',
+  // ─── Basic Capital Component ME ──────────────────────────────────────
+  // Affects T1 capital ship construction components (group 873) — things
+  // like Capital Armor Plates, Capital Shield Emitter, Capital Propulsion
+  // Engine. These are the bulk inputs for capital hulls (Ark, Rhea,
+  // Providence, etc.). Separate rig family from Advanced Component above.
+  //
+  // L-Set fits Azbel + Sotiyo (large rig slots).
+  // M-Set fits Raitaru + Azbel (medium rig slots).
+  // Source: EVERef types 43718 / 43719 (L-Set), 43870 / 43871 (M-Set),
+  //         45546 (L Thukker), 45544 (M Thukker).
+  'rig_bcapcme_L_1': {
+    id: 'rig_bcapcme_L_1', typeId: 43718, name: 'L-Set Basic Capital Component ME I',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.0, categories: ['advancedComponent'], tier: 1,
-    fits: ['raitaru', 'azbel', 'sotiyo'],
+    basePercent: -2.0, categories: ['capitalComponent'], tier: 1,
+    fits: ['azbel', 'sotiyo'],
   },
-  'rig_acme_2': {
-    id: 'rig_acme_2', typeId: 43862, name: 'Advanced Components ME II',
+  'rig_bcapcme_L_2': {
+    id: 'rig_bcapcme_L_2', typeId: 43719, name: 'L-Set Basic Capital Component ME II',
     activity: 'manufacturing', bonusType: 'material',
-    basePercent: -2.4, categories: ['advancedComponent'], tier: 2,
-    fits: ['raitaru', 'azbel', 'sotiyo'],
+    basePercent: -2.4, categories: ['capitalComponent'], tier: 2,
+    fits: ['azbel', 'sotiyo'],
+  },
+  'rig_bcapcme_M_1': {
+    id: 'rig_bcapcme_M_1', typeId: 43870, name: 'M-Set Basic Capital Component ME I',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.0, categories: ['capitalComponent'], tier: 1,
+    fits: ['raitaru', 'azbel'],
+  },
+  'rig_bcapcme_M_2': {
+    id: 'rig_bcapcme_M_2', typeId: 43871, name: 'M-Set Basic Capital Component ME II',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -2.4, categories: ['capitalComponent'], tier: 2,
+    fits: ['raitaru', 'azbel'],
+  },
+  // Thukker variants: -3.7% base, lowsec-optimized curve (hisec 0.1x, null 0.1x).
+  // At a lowsec Azbel this gives -3.7 × 1.9 = -7.03%, the strongest capital
+  // component rig in the game. At a nullsec Sotiyo it's only -3.7 × 0.1 =
+  // -0.37% — nearly useless outside lowsec.
+  'rig_bcapcme_L_thk': {
+    id: 'rig_bcapcme_L_thk', typeId: 45546, name: 'L-Set Thukker Basic Capital Component ME',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -3.7, categories: ['capitalComponent'], tier: 1, faction: true,
+    fits: ['azbel', 'sotiyo'],
+    securityCurve: { hisec: 0.1, lowsec: 1.9, null: 0.1, wh: 0.1 },
+  },
+  'rig_bcapcme_M_thk': {
+    id: 'rig_bcapcme_M_thk', typeId: 45544, name: 'M-Set Thukker Basic Capital Component ME',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -3.7, categories: ['capitalComponent'], tier: 1, faction: true,
+    fits: ['raitaru', 'azbel'],
+    securityCurve: { hisec: 0.1, lowsec: 1.9, null: 0.1, wh: 0.1 },
   },
 
   // ─── Equipment (modules) ─────────────────────────────────────────────
@@ -5829,23 +5912,43 @@ const RIG_CATALOG = {
     fits: ['sotiyo'],
   },
 
-  // ─── XL Structure & Component Manufacturing ME ──────────────────────
-  // Affects components (T1 + T2), Upwell structures, structure modules,
-  // structure rigs, starbase structures, fuel blocks. We map to both
-  // 'component' and 'advancedComponent' buckets since it covers both.
+  // ─── XL Structure & Component Manufacturing ME (Sotiyo-only) ────────
+  // Affects components (T1 + T2), T1 CAPITAL components, T2 CAPITAL
+  // components, Upwell structures, structure modules, structure rigs,
+  // starbase structures, fuel blocks. This is the broadest manufacturing
+  // rig in the game — a single XL rig at a Sotiyo covers everything from
+  // Tritanium-based T1 components up to T2 capital components like
+  // Capital Fernite Carbide Composite Armor Plate.
+  //
+  // TypeID correction: earlier versions of this catalog used 37182/37183
+  // for these rigs, but those typeIDs are actually XL-Set Laboratory
+  // Optimization II/I (a research rig, not a manufacturing rig). The real
+  // XL Structure & Component ME rigs are 43704/43705. Source: EVERef.
   'rig_xlstructme_1': {
-    id: 'rig_xlstructme_1', typeId: 37182, name: 'XL Structure & Component ME I',
+    id: 'rig_xlstructme_1', typeId: 43704, name: 'XL Structure & Component ME I',
     activity: 'manufacturing', bonusType: 'material',
     basePercent: -2.0, tier: 1,
-    categories: ['component', 'advancedComponent'],
+    categories: ['component', 'advancedComponent', 'capitalComponent', 'advancedCapitalComponent'],
     fits: ['sotiyo'],
   },
   'rig_xlstructme_2': {
-    id: 'rig_xlstructme_2', typeId: 37183, name: 'XL Structure & Component ME II',
+    id: 'rig_xlstructme_2', typeId: 43705, name: 'XL Structure & Component ME II',
     activity: 'manufacturing', bonusType: 'material',
     basePercent: -2.4, tier: 2,
-    categories: ['component', 'advancedComponent'],
+    categories: ['component', 'advancedComponent', 'capitalComponent', 'advancedCapitalComponent'],
     fits: ['sotiyo'],
+  },
+  // XL-Set Thukker Structure and Component ME — faction variant of the above.
+  // Enhanced bonus on capital components, normal bonus on other components.
+  // As with the L/M-Set Thukker Advanced rigs, we only model the enhanced
+  // tier (on capital components). Source: EVERef type 45548.
+  'rig_xlstructme_thk': {
+    id: 'rig_xlstructme_thk', typeId: 45548, name: 'XL-Set Thukker Structure & Component ME',
+    activity: 'manufacturing', bonusType: 'material',
+    basePercent: -3.7, tier: 1, faction: true,
+    categories: ['capitalComponent', 'advancedCapitalComponent'],
+    fits: ['sotiyo'],
+    securityCurve: { hisec: 0.1, lowsec: 1.9, null: 0.1, wh: 0.1 },
   },
 };
 
@@ -5918,7 +6021,13 @@ const PRODUCT_CATEGORY_MAP = {
   // ── Components / Modules (category 4 Material, 7 Module, 17 Commodity) ─
   // T1 construction components (Fernite Carbide plates, etc.)
   334:  'component',       // Construction Components (generic)
-  913:  'component',       // Composite Reaction intermediate — treat as component
+  913:  'advancedCapitalComponent', // T2 Capital Construction Components (e.g. Capital Fernite Carbide Composite Armor Plate)
+  873:  'capitalComponent', // T1 Capital Construction Components (e.g. Capital Armor Plates, Capital Shield Emitter)
+  // T1 Capital Construction Components use their own rig family
+  // (L-Set/M-Set Basic Capital Component ME). Source: EVERef group 873.
+  // T2 Capital Construction Components use the L-Set/M-Set Advanced
+  // Component ME rigs (same family that covers all T2 components).
+  // Source: EVERef group 913, rig 45641 "Affected groups" list.
   // T2 advanced components
   965:  'advancedComponent', // T2 Advanced Components
   // Modules / equipment (category 7 — huge variety)
@@ -6142,9 +6251,19 @@ function effectiveBonus(activity, productTypeID, stationID) {
   if (!productCategory) return multiplier;
 
   // (5) Apply matching rigs. Crucial: use the right security curve.
-  const secMult = isReaction
+  // Default curve: standard manufacturing (1.0/1.9/2.1) or reaction (1.0/1.0/1.1).
+  // Per-rig override: Thukker faction rigs have a flipped curve (0.1/1.9/0.1)
+  //   that gives big bonuses ONLY in lowsec. When a rig specifies its own
+  //   securityCurve, we compute its multiplier separately instead of using
+  //   the default. This is in a closure so we don't call the curve fn twice
+  //   per iteration for the common (no-override) case.
+  const defaultSec = isReaction
     ? reactionSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass)
     : rigSecurityMultiplier(cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+  const resolveSecMult = (rig) => {
+    if (!rig.securityCurve) return defaultSec;
+    return rigCurveLookup(rig.securityCurve, cfg.systemSecurity, cfg.isWormhole, cfg.wormholeClass);
+  };
 
   for (const rigId of rigIds) {
     const rig = RIG_CATALOG[rigId];
@@ -6153,11 +6272,36 @@ function effectiveBonus(activity, productTypeID, stationID) {
     if (rig.bonusType !== 'material') continue;
     if (!rig.categories.includes(productCategory)) continue;
 
+    const secMult = resolveSecMult(rig);
     const rigMult = 1 + (rig.basePercent * secMult) / 100;
     multiplier *= rigMult;
   }
 
   return multiplier;
+}
+
+// Per-rig security curve lookup. A rig's optional securityCurve field is
+// a plain object like { hisec: 1.0, lowsec: 1.9, null: 2.1, wh: 2.1 } that
+// tells us which multiplier applies in each space class. This lets us
+// model Thukker faction rigs which invert the normal manufacturing curve
+// (hisec 0.1, lowsec 1.9, null 0.1 — lowsec-only bonus).
+//
+// Accepts the same (systemSecurity, isWormhole, wormholeClass) signature
+// as the default curve functions so it's drop-in-equivalent.
+function rigCurveLookup(curve, systemSecurity, isWormhole, wormholeClass) {
+  if (isWormhole) {
+    // If the curve explicitly specifies wh by class, honor it; otherwise fall
+    // back to the 'wh' default, and finally to 'null' (reasonable fallback
+    // since CCP uses the same null/WH curve on most rigs).
+    if (wormholeClass != null && wormholeClass >= 4 && curve.whHigh != null) return curve.whHigh;
+    if (curve.wh != null) return curve.wh;
+    if (curve.null != null) return curve.null;
+    return 1.0;
+  }
+  if (systemSecurity == null) return curve.hisec != null ? curve.hisec : 1.0;
+  if (systemSecurity >= 0.45) return curve.hisec != null ? curve.hisec : 1.0;
+  if (systemSecurity > 0.0)   return curve.lowsec != null ? curve.lowsec : 1.0;
+  return curve.null != null ? curve.null : 1.0;
 }
 
 // Thin wrapper — original name preserved for backwards compat. All existing
