@@ -3918,8 +3918,15 @@
      ───────────────────────────────────────────────────────────── */
   @media (max-width: 600px) {
 
-    /* ---- 1. Hide characters bar on phone ---- */
-    .chars-bar { display: none; }
+    /* ---- 1. Characters bar on mobile: keep Sync All, hide chip ----
+       Previously this hid the entire .chars-bar. That made the
+       Sync All button unreachable on phone — it has no other home
+       in the UI. Instead, keep the bar visible but hide just the
+       primary-character chip (which is redundant with the Characters
+       tab anyway). Compact the Sync button so the topbar stays tidy. */
+    .chars-bar { display: flex; gap: 6px; }
+    .chars-bar .char-chip { display: none; }
+    .char-sync-btn { font-size: 10px; padding: 6px 10px; min-height: 32px; }
 
     /* ---- 2. Stack quadrants vertically ---- */
     /* The desktop content-area is a 2×2 grid where TR spans both rows.
