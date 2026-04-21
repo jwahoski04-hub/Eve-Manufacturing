@@ -3580,6 +3580,217 @@
   /* Flow arrow animation */
   @keyframes dash { to { stroke-dashoffset: -12; } }
   .flow-arrow line { animation: dash 1s linear infinite; }
+
+  /* ============================================================
+     MOBILE (≤600px) — pragmatic phone pass
+     ============================================================
+     Layers on top of the desktop rules above. All overrides live
+     inside this single media query so it's easy to audit and easy
+     to disable if anything goes sideways. Scope is portrait phone
+     (≈380–600px). No JS changes; desktop is untouched.
+
+     Summary of what this block does:
+       1. Hide characters bar entirely (per product decision).
+       2. Stack the 4 quadrants vertically instead of 2×2.
+       3. Let the app scroll vertically (desktop uses overflow:hidden
+          and per-quadrant scrollers; phone needs page scroll).
+       4. Shrink top bar + allow wrap, hide BACK TO HUB to save space.
+       5. Make the right-column tab strip horizontally scrollable.
+       6. Collapse Q4's 3-column pricing header to 1 column.
+       7. Stack modal two-column grids (New Project, Rig Picker).
+       8. Wrap wide grid rows in overflow-x:auto containers where
+          the grid has >3 fixed columns (job queue, asset rows).
+       9. Bump touch target sizes on small controls.
+      10. Let the stations tooltip react to :active (touch-hold) too.
+     ============================================================ */
+  @media (max-width: 600px) {
+
+    /* ---- 1. Hide characters bar on phone ---- */
+    .chars-bar { display: none; }
+
+    /* ---- 2. Stack quadrants vertically ---- */
+    /* The desktop content-area is a 2×2 grid where TR spans both rows.
+       On phone we want a simple vertical stack. Each quadrant gets a
+       reasonable min-height so it's usable; the page scrolls as a
+       whole rather than each quadrant scrolling independently. */
+    .content-area {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto;
+      grid-template-areas:
+        "tl"
+        "tr"
+        "bl"
+        "br";
+      overflow: visible;
+      height: auto;
+    }
+    .quadrant {
+      overflow: visible;
+      min-height: 60vh;
+      border-right: none !important;
+      border-bottom: 1px solid #1a2028 !important;
+    }
+    .quad-tl { grid-area: tl; }
+    .quad-tr { grid-area: tr; }
+    .quad-bl { grid-area: bl; }
+    /* Q4 (market & costs) currently has no class name; it's the only
+       quadrant without an explicit grid-area. It'll flow into 'br'
+       automatically since it's the 4th in source order after tl/tr/bl. */
+
+    /* ---- 3. Let the whole app scroll vertically ---- */
+    body { overflow: auto; overflow-x: hidden; }
+    html, body { height: auto; min-height: 100%; }
+    .app { height: auto; min-height: 100vh; }
+
+    /* ---- 4. Top bar: tighter, allow wrap, hide BACK TO HUB ---- */
+    .topbar {
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px 10px;
+    }
+    .topbar-left { gap: 6px; }
+    .topbar-right { gap: 8px; font-size: 10px; flex-wrap: wrap; }
+    .back-hub { display: none; }     /* absolute-positioned — hide it on phone, relaunch from hub link anyway */
+    .wallet { font-size: 10px; }
+
+    /* ---- 5. Right-column tab strip scrolls horizontally ---- */
+    /* The 5-tab strip (Material / Assets / Stations / Queue / Characters)
+       doesn't fit in 380px. Let it scroll laterally; each tab keeps its
+       desktop padding so taps are comfortable. */
+    .quad-tabs {
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .quad-tabs::-webkit-scrollbar { display: none; }
+    .quad-tab {
+      flex-shrink: 0;
+      padding: 0 14px;
+      font-size: 11px;
+      min-height: 38px;
+    }
+
+    /* ---- 6. Q4 pricing header collapses to single column ---- */
+    /* Desktop has title | controls | meta in a 3-col grid; on phone we
+       want them to stack so the Fetch button isn't squished. */
+    .quad-header-pricing {
+      grid-template-columns: 1fr;
+      gap: 6px;
+      padding: 8px 12px;
+    }
+    .quad-header-pricing .quad-header-title,
+    .quad-header-pricing .quad-header-meta { justify-self: start; }
+    .pricing-controls { justify-self: start; flex-wrap: wrap; }
+
+    /* ---- 7. Stack modal two-column grids ---- */
+    /* .np-row2 is the two-col grid inside New Project modal (runs + ???).
+       .rp-row is the two-col grid inside Rig Picker modal. Force single-col
+       so fields aren't squeezed into ~170px wide boxes on a 380px phone. */
+    .np-row2,
+    .rp-row {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* ---- 8. Wide grid rows: horizontal scroll inside their container ---- */
+    /* Only the Q2 shopping list has rows wide enough to actually need it:
+         .q2-shop-row    = 7-col grid (32px 1fr 80px 60px 70px 70px 90px) ≈ 560px min
+         .q2-shop-row-bp = 5-col grid (32px 1fr 80px 100px 160px)        ≈ 520px min
+       The jobs queue (3-col), stations-option (3-col) and assets-item-row
+       (4-col) all fit within 380px so they don't need wrapping — they'd
+       just get horizontal scroll on content that already fits, which is
+       worse than leaving them alone. */
+    .q2-shopping {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .q2-shop-row,
+    .q2-shop-row-bp {
+      min-width: 560px;
+    }
+
+    /* Q4 freight rows (5-col grid: 28px 1fr auto auto auto) — wrap its
+       list container so it scrolls rather than squishing. */
+    .q4-freight-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .q4-freight-row { min-width: 420px; }
+
+    /* ---- 9. Touch-target bumps on tiny controls ---- */
+    .project-drawer-toggle { min-height: 36px; font-size: 11px; padding: 8px 10px; }
+    .project-drawer-pill  { min-height: 34px; font-size: 11px; padding: 8px 10px; }
+    .topbar-btn           { min-height: 32px; padding: 6px 12px; }
+    .help-btn             { min-height: 32px; }
+    .pricing-fetch-btn    { min-height: 34px; padding: 6px 14px; font-size: 11px; }
+    .multibuy-mode-btn    { min-height: 30px; padding: 6px 10px; }
+    .multibuy-copy-btn    { min-height: 30px; padding: 6px 12px; }
+    /* The delete-×, drawer chevron, and rig pills stay small but get
+       more hit area via padding rather than visual growth. */
+    .project-delete-btn { width: 28px; height: 28px; opacity: 0.6; }
+    /* Info icons (Q4 summary 'i' tooltips) — grow the hit target. */
+    .q4-info { width: 18px; height: 18px; font-size: 10px; margin-left: 6px; }
+
+    /* Project cards: give the thumb a little less width on phone so the
+       name column has room to breathe. */
+    .project-card {
+      grid-template-columns: 44px 1fr;
+      gap: 10px;
+      padding: 8px;
+    }
+    .project-thumb img { width: 44px !important; height: 44px !important; }
+
+    /* ---- 10. Stations tooltip responds to :active too ---- */
+    /* Desktop uses :hover on .stations-pill-wrap to fade the panel in.
+       Touch devices don't hover — :active fires on touch-and-hold. We
+       keep the same visual behavior. Users can tap-hold a rig pill to
+       see the breakdown. */
+    .stations-pill-wrap:active .stations-tooltip,
+    .stations-pill-wrap:focus-within .stations-tooltip {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    /* On narrow screens, let the tooltip span available width instead of
+       its desktop fixed 300–380px (which overflows the viewport). */
+    .stations-tooltip {
+      min-width: 0;
+      max-width: calc(100vw - 24px);
+      right: auto;
+      left: 0;
+    }
+
+    /* ---- Modals (New Project, Rig Picker) — full-screen-ish ---- */
+    /* Desktop modals are centered boxes with fixed max-widths (.np-panel =
+       520px, .rp-panel = 560px). On phone let them expand to fill the
+       viewport with a small margin so inputs have real room. */
+    .np-panel,
+    .rp-panel {
+      width: calc(100vw - 16px) !important;
+      max-width: calc(100vw - 16px) !important;
+      max-height: calc(100vh - 32px);
+      margin: 16px 8px;
+    }
+
+    /* ---- Welcome gate — already reasonable, just tighten ---- */
+    .welcome-card { width: calc(100vw - 32px); padding: 20px 18px; }
+    .welcome-title { font-size: 18px; }
+    .welcome-sub   { font-size: 10px; letter-spacing: 0.18em; }
+
+    /* ---- Factory flow (TL): the 6-col tile grid is 337px wide on desktop
+             and just barely fits at 380px. Relax the wrapper width and let
+             the inputs grid use auto-fill so tiles wrap on the narrowest
+             phones instead of touching the edges. */
+    .factory-body { padding: 8px; }
+    .factory-inputs { width: 100%; max-width: 100%; }
+    .inputs-grid {
+      grid-template-columns: repeat(auto-fill, 52px) !important;
+      justify-content: center;
+    }
+
+    /* ---- Q2 / Q4 tables: shrink padding a hair to fit content. */
+    .q4-summary,
+    .multibuy-bar { padding: 8px 10px; }
+    .q4-summary-row { font-size: 11px; }
+    .q4-summary-label { font-size: 10px; letter-spacing: 0.06em; }
+
+  } /* end @media max-width:600px */
 </style>
 </head>
 <body>
