@@ -3582,6 +3582,64 @@
   .flow-arrow line { animation: dash 1s linear infinite; }
 
   /* ============================================================
+     INTERMEDIATE (≤1200px) — prevent TL factory flow from clipping
+     ============================================================
+     At viewports ≤1200px the 4-quadrant 2x2 grid gives each quadrant
+     roughly 600–700 CSS px. The factory-body flex row inside the TL
+     quadrant has a minimum content width of ~725px (product 260px +
+     gap 20 + arrow 40 + gap 20 + inputs 337px + padding 48px), so
+     on narrow viewports it overflows and gets clipped by the
+     parent's overflow:hidden. Since justify-content:center centers
+     the overflow symmetrically, users see the product clipping off
+     the left edge and/or the inputs getting cut off on the right.
+
+     Caused by three things that can each be relaxed on narrow screens:
+       1. factory-body padding: 16px 24px (48px horizontal total)
+       2. factory-body gap: 20px (40px total between 3 children)
+       3. factory-inputs fixed width: 337px
+
+     Fix: shrink padding and gap, and let the inputs grid wrap when
+     the 6-col x 52px layout can't fit. Keeps the 2x2 quadrant grid
+     intact — this is specifically NOT mobile-stacked layout, just
+     tighter internals so content fits.
+
+     Triggers for typical corpmate setups:
+       - 1920x1080 @ 150% → 1280px viewport (just under)
+       - 3840x2400 @ 250% → 1536px viewport (over, no-op — good)
+       - 1366x768  @ 125% → 1093px viewport
+       - 1920x1080 @ 200% → 960px viewport
+     Below 600px the mobile block takes over and handles the rest. */
+  @media (max-width: 1200px) and (min-width: 601px) {
+    .factory-body {
+      padding: 12px 10px;
+      gap: 10px;
+    }
+    .factory-inputs {
+      /* Let the inputs panel shrink instead of claiming a fixed 337px.
+         The grid inside it uses auto-fill so tiles wrap naturally. */
+      width: auto;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .inputs-grid {
+      /* auto-fill lets tiles wrap across more rows on narrower quadrants.
+         Each tile is 52px; gap 5px. With 6 tiles this needs ~347px; 5
+         tiles ~294px; 4 tiles ~238px. The grid wraps automatically. */
+      grid-template-columns: repeat(auto-fill, 52px);
+    }
+    .factory-product {
+      /* Allow product to participate in the flex squeeze if needed. */
+      min-width: 0;
+    }
+    .product-frame {
+      /* Shrink the product badge slightly on tight quadrants so it
+         doesn't push the inputs off-screen. Keeps aspect square. */
+      width: 200px;
+      height: 200px;
+    }
+  }
+
+  /* ============================================================
      MOBILE (≤600px) — pragmatic phone pass
      ============================================================
      Layers on top of the desktop rules above. All overrides live
