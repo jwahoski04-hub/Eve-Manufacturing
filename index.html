@@ -3604,10 +3604,21 @@
      tighter internals so content fits.
 
      Triggers for typical corpmate setups:
-       - 1920x1080 @ 150% → 1280px viewport (just under)
-       - 3840x2400 @ 250% → 1536px viewport (over, no-op — good)
-       - 1366x768  @ 125% → 1093px viewport
-       - 1920x1080 @ 200% → 960px viewport
+       - 1920x1080 @ 150% → 1280px viewport (just under — tightens)
+       - 1920x1080 @ 175% → 1097px viewport (tightens)
+       - 1920x1080 @ 200% → 960px viewport (tightens)
+       - 1366x768  @ 125% → 1093px viewport (tightens)
+
+     NOT in this tier (because math says they should already fit):
+       - 1920x1080 @ 100% → 1920px (desktop default is fine)
+       - 1920x1080 @ 125% → 1536px (~768px/quadrant, fits the 725px factory)
+       - 3840x2400 @ 250% → 1536px (same as above — fits)
+     If a 1536px user still reports clipping, the cause is elsewhere
+     (browser zoom on top of OS scaling, devtools docked, window not
+     maximized) — not the layout. Widening this breakpoint to catch
+     1536px would actively hurt the experience for users who are
+     currently working fine.
+
      Below 600px the mobile block takes over and handles the rest. */
   @media (max-width: 1200px) and (min-width: 601px) {
     .factory-body {
