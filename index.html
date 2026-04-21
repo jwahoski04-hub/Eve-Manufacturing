@@ -3970,6 +3970,28 @@
       max-width: 100vw;
       overflow-x: hidden;
     }
+    /* ---- 3c. Cap EVERY major container to viewport width on mobile.
+       Even with .app / .main-body capped, a descendant like .content-area
+       or .quadrant can still get its intrinsic width from its own grid
+       column sizes or flex content. Forcing max-width: 100vw and min-width: 0
+       at each level prevents that propagation.
+       
+       min-width: 0 is critical — grid and flex items default to
+       min-width: auto (their content's intrinsic width), which bypasses
+       max-width when the content is wider than the container. Setting
+       min-width: 0 lets them shrink below intrinsic content width. */
+    .content-area,
+    .quadrant,
+    .quad-body,
+    .quad-header,
+    .factory-body,
+    .topbar,
+    .topbar-left,
+    .topbar-right {
+      max-width: 100vw;
+      min-width: 0;
+      box-sizing: border-box;
+    }
 
     /* ---- 3b. Stack main-body vertically on mobile ----
        Desktop: .main-body is flex-row with [content-area | sidebar].
