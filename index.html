@@ -3670,11 +3670,18 @@
      tiers — they represent the "tight" mode that works at any
      width below ~1100px. */
   @media (max-width: 1100px) and (min-width: 801px) {
-    /* Factory flow goes into tight mode */
-    .factory-body    { padding: 12px 10px; gap: 10px; }
-    .factory-inputs  { width: auto; min-width: 0; max-width: 100%; }
+    /* Factory flow goes into tight mode.
+       Critical: desktop .factory-inputs/.factory-product/.factory-arrow
+       all have flex-shrink: 0, so at narrow widths the flex row can't
+       compress — content overflows both sides of the centered row,
+       which clips the product off the LEFT edge of the quadrant.
+       Override flex-shrink AND switch justify-content so overflow
+       (if any remains) spills out only to the right. */
+    .factory-body    { padding: 12px 10px; gap: 10px; justify-content: flex-start; align-items: flex-start; }
+    .factory-inputs  { width: auto; min-width: 0; max-width: 100%; flex-shrink: 1; flex: 1 1 auto; }
+    .factory-arrow   { flex-shrink: 1; }
+    .factory-product { min-width: 0; flex-shrink: 1; }
     .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); }
-    .factory-product { min-width: 0; }
     .product-frame   { width: 200px; height: 200px; }
 
     /* Top bar: allow wrap so the help button and wallet don't
@@ -3693,13 +3700,14 @@
      top bar tightens further. Full 1-column stack will land in
      Chunk 6 of the responsive pass. */
   @media (max-width: 800px) and (min-width: 601px) {
-    /* Factory flow stays in tight mode (inherited from tier 2 via
-       duplicated rules — tier 2 doesn't cascade to tier 3 because
-       it uses min-width: 801px). Repeat the rules here. */
-    .factory-body    { padding: 10px 8px; gap: 8px; }
-    .factory-inputs  { width: auto; min-width: 0; max-width: 100%; }
+    /* Factory flow stays in tight mode. Same flex-shrink overrides as
+       tier 2 (tiers don't cascade since they use mutually exclusive
+       min-width ranges) plus slightly tighter paddings. */
+    .factory-body    { padding: 10px 8px; gap: 8px; justify-content: flex-start; align-items: flex-start; }
+    .factory-inputs  { width: auto; min-width: 0; max-width: 100%; flex-shrink: 1; flex: 1 1 auto; }
+    .factory-arrow   { flex-shrink: 1; }
+    .factory-product { min-width: 0; flex-shrink: 1; }
     .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); }
-    .factory-product { min-width: 0; }
     .product-frame   { width: 180px; height: 180px; }
 
     /* Top bar: even tighter. BACK TO HUB still visible but
