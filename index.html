@@ -3739,23 +3739,29 @@
     /* Factory flow: STACK instead of row. Product above, arrow
        rotated or hidden, inputs below. Product shrinks to 160px
        to leave vertical room. Inputs grid auto-fills to available
-       width so tiles wrap cleanly. */
+       width so tiles wrap cleanly.
+       Important: align-items: stretch (not center) — centering via
+       align-items collapses the inputs flex child to its intrinsic
+       content width, which makes the grid only 2-3 cols wide. Use
+       margin:0 auto on the product/arrow to center them individually. */
     .factory-body    {
       flex-direction: column;
       padding: 10px 12px;
       gap: 10px;
       justify-content: flex-start;
-      align-items: center;
+      align-items: stretch;
     }
-    .factory-product { min-width: 0; flex-shrink: 1; }
+    .factory-product { min-width: 0; flex-shrink: 1; margin: 0 auto; }
     .factory-arrow   {
       /* Rotate the arrow 90deg to point DOWN since flow is now
-         product → inputs vertically. Flex-shrink:1 for safety. */
+         product → inputs vertically. Flex-shrink:1 for safety.
+         margin:0 auto centers the arrow in the column. */
       flex-shrink: 1;
       transform: rotate(90deg);
+      margin: 0 auto;
     }
     .factory-inputs  { width: 100%; min-width: 0; max-width: 100%; flex-shrink: 1; flex: 0 0 auto; }
-    .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); justify-content: center; }
+    .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); justify-content: center; width: 100%; }
     .product-frame   { width: 160px; height: 160px; }
 
     /* Top bar: allow wrap so the help button and wallet don't
@@ -3817,18 +3823,23 @@
      but tighter paddings and smaller product frame. 2×2 stays
      intact — 1-column stack only kicks in at <600px. */
   @media (max-width: 800px) and (min-width: 601px) {
-    /* Factory flow: same stacked layout as tier 2, tighter padding. */
+    /* Factory flow: same stacked layout as tier 2, tighter padding.
+       Important: align-items must be STRETCH (default), not center,
+       or .factory-inputs (flex child) shrinks to intrinsic content
+       width, which collapses the inputs-grid to just 2-3 columns.
+       Center the product badge with margin:0 auto on the product
+       itself, not via align-items on the container. */
     .factory-body    {
       flex-direction: column;
       padding: 8px 10px;
       gap: 8px;
       justify-content: flex-start;
-      align-items: center;
+      align-items: stretch;
     }
-    .factory-product { min-width: 0; flex-shrink: 1; }
-    .factory-arrow   { flex-shrink: 1; transform: rotate(90deg); }
+    .factory-product { min-width: 0; flex-shrink: 1; margin: 0 auto; }
+    .factory-arrow   { flex-shrink: 1; transform: rotate(90deg); margin: 0 auto; }
     .factory-inputs  { width: 100%; min-width: 0; max-width: 100%; flex-shrink: 1; flex: 0 0 auto; }
-    .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); justify-content: center; }
+    .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); justify-content: center; width: 100%; }
     .product-frame   { width: 140px; height: 140px; }
 
     /* Top bar: even tighter. BACK TO HUB still visible but
