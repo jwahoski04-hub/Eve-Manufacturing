@@ -4107,6 +4107,50 @@
     .q4-summary-label { font-size: 10px; letter-spacing: 0.06em; }
 
   } /* end @media max-width:600px */
+
+
+  /* ─────────────────────────────────────────────────────────────
+     HEIGHT-BASED TIERS — short-viewport rules
+     ─────────────────────────────────────────────────────────────
+     The width-based cascade above handles narrow viewports. These
+     height rules handle SHORT viewports — situations where the
+     content-area doesn't have enough vertical room for Q1's default
+     260px product frame plus its header and padding.
+
+     Triggers independent of width:
+       - 4K monitor @ 225% scaling (1707 × 960 → tall enough if
+         browser is maximized cleanly, but often ~780px if the user
+         has bookmarks bar + tab bar + address bar)
+       - Laptop user with devtools docked to the bottom
+       - Anyone on a non-maximized window with vertical toolbars
+         eating space
+
+     The fix: progressively shrink the product frame and tighten
+     factory-body padding as vertical space gets tight. These layer
+     on top of whatever the width tier is doing — so a user who is
+     both narrow AND short gets the tighter of each rule.
+     ───────────────────────────────────────────────────────────── */
+
+
+  /* TIER H1 — medium-short viewport (≤900px tall).
+     Small tightening: product frame 260→200, slight padding reduction. */
+  @media (max-height: 900px) and (min-height: 751px) {
+    .product-frame { width: 200px; height: 200px; }
+    .factory-body  { padding: 12px 20px; }
+  }
+
+
+  /* TIER H2 — short viewport (≤750px tall).
+     More aggressive: product frame 160, tight padding. Affects 4K
+     users at 225%+ scaling with bookmark/tab bars, and anyone on a
+     genuinely short display. */
+  @media (max-height: 750px) {
+    .product-frame { width: 160px; height: 160px; }
+    .factory-body  { padding: 8px 16px; gap: 12px; }
+    /* Also tighten the quad-header so more room is left for the
+       factory content. */
+    .quad-header   { padding: 4px 12px; }
+  }
 </style>
 </head>
 <body>
