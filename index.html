@@ -3791,6 +3791,14 @@
     .q4-freight-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .q4-freight-row  { min-width: 420px; }
 
+    /* Q4 multibuy bar: let it wrap so the copy button doesn't push
+       the mode toggle off-screen when the quadrant is narrow. */
+    .multibuy-bar      { flex-wrap: wrap; gap: 8px; }
+    .multibuy-copy-btn { margin-left: 0; }
+
+    /* Q4 summary rows: allow value column to wrap under long labels. */
+    .q4-summary-row    { flex-wrap: wrap; gap: 4px; }
+
     /* Stations tooltip: desktop caps at 300–380px but at narrow
        quadrant widths that can still overflow the viewport. Cap
        to viewport width with a margin. */
@@ -3846,6 +3854,19 @@
     .q2-shop-row-bp  { min-width: 560px; }
     .q4-freight-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .q4-freight-row  { min-width: 420px; }
+
+    /* Q4 multibuy bar: allow wrapping so the [ALL/BATCH mode toggle]
+       and [Copy button] can sit on separate lines when the quadrant
+       is too narrow (~371px) to fit them in a single row. Without
+       this the copy button pushes the mode buttons off-screen. */
+    .multibuy-bar    { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+    .multibuy-copy-btn { margin-left: 0; }
+
+    /* Q4 summary rows: allow the value column to shrink/wrap so long
+       ISK amounts don't push the label column off. Labels stay on one
+       line but value can wrap onto a new line under the label. */
+    .q4-summary-row  { flex-wrap: wrap; gap: 4px; }
+    .q4-summary-label { max-width: 100%; }
 
     /* Stations tooltip: cap to viewport. */
     .stations-tooltip { min-width: 0; max-width: calc(100vw - 40px); }
