@@ -3603,75 +3603,135 @@
      intact — this is specifically NOT mobile-stacked layout, just
      tighter internals so content fits.
 
-     Triggers for typical corpmate setups:
-       - 1920x1080 @ 150% → 1280px viewport (just under — tightens)
-       - 1920x1080 @ 175% → 1097px viewport (tightens)
-       - 1920x1080 @ 200% → 960px viewport (tightens)
-       - 1366x768  @ 125% → 1093px viewport (tightens)
+  /* ============================================================
+     RESPONSIVE CASCADE — 4 progressive tiers
+     ============================================================
 
-     NOT in this tier (because math says they should already fit):
-       - 1920x1080 @ 100% → 1920px (desktop default is fine)
-       - 1920x1080 @ 125% → 1536px (~768px/quadrant, fits the 725px factory)
-       - 3840x2400 @ 250% → 1536px (same as above — fits)
-     If a 1536px user still reports clipping, the cause is elsewhere
-     (browser zoom on top of OS scaling, devtools docked, window not
-     maximized) — not the layout. Widening this breakpoint to catch
-     1536px would actively hurt the experience for users who are
-     currently working fine.
+     The tool was designed for ≥1600px widescreen displays. To work
+     on smaller viewports (high-DPI scaling, laptops, tablets, phones)
+     we progressively tighten and reflow through four breakpoints:
 
-     Below 600px the mobile block takes over and handles the rest. */
-  @media (max-width: 1200px) and (min-width: 601px) {
-    .factory-body {
-      padding: 12px 10px;
-      gap: 10px;
-    }
-    .factory-inputs {
-      /* Let the inputs panel shrink instead of claiming a fixed 337px.
-         The grid inside it uses auto-fill so tiles wrap naturally. */
-      width: auto;
-      min-width: 0;
-      max-width: 100%;
-    }
-    .inputs-grid {
-      /* auto-fill lets tiles wrap across more rows on narrower quadrants.
-         Each tile is 52px; gap 5px. With 6 tiles this needs ~347px; 5
-         tiles ~294px; 4 tiles ~238px. The grid wraps automatically. */
-      grid-template-columns: repeat(auto-fill, 52px);
-    }
-    .factory-product {
-      /* Allow product to participate in the flex squeeze if needed. */
-      min-width: 0;
-    }
-    .product-frame {
-      /* Shrink the product badge slightly on tight quadrants so it
-         doesn't push the inputs off-screen. Keeps aspect square. */
-      width: 200px;
-      height: 200px;
-    }
+       ≥1600px       full desktop 2×2 (untouched)
+       1100–1600px   narrow desktop: 2×2 kept, internals fluid
+       800–1100px    laptop: stack quadrants to 1 column
+       600–800px     tablet: 1 column, tighter type/padding
+       <600px        phone: hide chars bar, tabs scroll, etc.
+
+     WHY A CASCADE AND NOT SEPARATE BLOCKS?
+     Each tier ADDS rules that cascade through narrower tiers (CSS
+     media query order matters — earlier queries are overridden by
+     later ones at the same specificity). So a rule that should apply
+     from 1600px down lives in the 1600px block; a rule that only
+     applies on phones lives in the 600px block. No duplication.
+
+     WHY 1600/1100/800/600?
+     Scaling math on common setups:
+       1920×1080 @ 100% → 1920px (fine, desktop)
+       1920×1080 @ 125% → 1536px (under 1600, into narrow desktop tier)
+       3840×2400 @ 250% → 1536px (same — narrow desktop)
+       1920×1080 @ 150% → 1280px (narrow desktop)
+       1920×1080 @ 175% → 1097px (near laptop boundary)
+       1920×1080 @ 200% → 960px  (laptop)
+       1366×768  @ 125% → 1093px (narrow desktop/laptop boundary)
+       1366×768  @ 200% → 683px  (tablet)
+       phone (any)      → 380–420px (mobile)
+
+     HANDOFF: the 2×2 quadrant grid reflow happens at 1100px. Above
+     that, tighter internals handle the space problem. Below that,
+     we go full 1-column stack because at ~500px per quadrant the
+     2×2 is actively hostile to content.
+     ============================================================ */
+
+
+  /* ─────────────────────────────────────────────────────────────
+     TIER 1 — NARROW DESKTOP (≤1600px)
+     ─────────────────────────────────────────────────────────────
+     First scaling tier. Keeps the 2×2 quadrant grid intact but
+     squeezes internal padding, shrinks fixed-width elements, and
+     lets grids wrap. Applies to users running at 125%+ scaling on
+     standard monitors, which math says is most of your corp. */
+  @media (max-width: 1600px) and (min-width: 1101px) {
+    /* Factory flow — shrink padding + gap so product+arrow+inputs
+       fit inside a ~700px quadrant without clipping. Full fluid
+       behavior is in the inputs-grid auto-fill below. */
+    .factory-body { padding: 14px 14px; gap: 14px; }
   }
 
-  /* ============================================================
-     MOBILE (≤600px) — pragmatic phone pass
-     ============================================================
-     Layers on top of the desktop rules above. All overrides live
-     inside this single media query so it's easy to audit and easy
-     to disable if anything goes sideways. Scope is portrait phone
-     (≈380–600px). No JS changes; desktop is untouched.
 
-     Summary of what this block does:
-       1. Hide characters bar entirely (per product decision).
+  /* ─────────────────────────────────────────────────────────────
+     TIER 2 — LAPTOP (≤1100px, >800px)
+     ─────────────────────────────────────────────────────────────
+     The 2×2 grid becomes cramped below ~1100px. This tier currently
+     holds the FACTORY FLOW and TOP BAR rules — the 2×2 → 1-column
+     reflow itself will land in Chunk 6 of the responsive pass
+     (after all quadrant internals are fluid).
+
+     Factory flow rules here are inherited down to tablet and mobile
+     tiers — they represent the "tight" mode that works at any
+     width below ~1100px. */
+  @media (max-width: 1100px) and (min-width: 801px) {
+    /* Factory flow goes into tight mode */
+    .factory-body    { padding: 12px 10px; gap: 10px; }
+    .factory-inputs  { width: auto; min-width: 0; max-width: 100%; }
+    .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); }
+    .factory-product { min-width: 0; }
+    .product-frame   { width: 200px; height: 200px; }
+
+    /* Top bar: allow wrap so the help button and wallet don't
+       push each other off the edge when both are showing. */
+    .topbar       { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+    .topbar-left  { gap: 8px; }
+    .topbar-right { gap: 10px; flex-wrap: wrap; }
+  }
+
+
+  /* ─────────────────────────────────────────────────────────────
+     TIER 3 — TABLET (≤800px, >600px)
+     ─────────────────────────────────────────────────────────────
+     Below 800px the tool feels phone-like but we still have room
+     for decorative elements. Factory flow continues in tight mode;
+     top bar tightens further. Full 1-column stack will land in
+     Chunk 6 of the responsive pass. */
+  @media (max-width: 800px) and (min-width: 601px) {
+    /* Factory flow stays in tight mode (inherited from tier 2 via
+       duplicated rules — tier 2 doesn't cascade to tier 3 because
+       it uses min-width: 801px). Repeat the rules here. */
+    .factory-body    { padding: 10px 8px; gap: 8px; }
+    .factory-inputs  { width: auto; min-width: 0; max-width: 100%; }
+    .inputs-grid     { grid-template-columns: repeat(auto-fill, 52px); }
+    .factory-product { min-width: 0; }
+    .product-frame   { width: 180px; height: 180px; }
+
+    /* Top bar: even tighter. BACK TO HUB still visible but
+       compacted. */
+    .topbar        { flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
+    .topbar-left   { gap: 6px; }
+    .topbar-right  { gap: 8px; flex-wrap: wrap; font-size: 10px; }
+    .wallet        { font-size: 10px; }
+  }
+
+
+  /* ─────────────────────────────────────────────────────────────
+     TIER 4 — MOBILE (≤600px)
+     ─────────────────────────────────────────────────────────────
+     Portrait phone layout (≈320–600px). Layers ON TOP of the
+     desktop rules above. Many rules here are reworked versions of
+     the old mobile block; some have been moved UP to the tablet
+     or laptop tiers as they should apply earlier.
+
+     What this tier does (summary):
+       1. Hide characters bar entirely (no space for it).
        2. Stack the 4 quadrants vertically instead of 2×2.
        3. Let the app scroll vertically (desktop uses overflow:hidden
           and per-quadrant scrollers; phone needs page scroll).
-       4. Shrink top bar + allow wrap, hide BACK TO HUB to save space.
+       4. Shrink top bar + hide BACK TO HUB to save space.
        5. Make the right-column tab strip horizontally scrollable.
        6. Collapse Q4's 3-column pricing header to 1 column.
        7. Stack modal two-column grids (New Project, Rig Picker).
-       8. Wrap wide grid rows in overflow-x:auto containers where
-          the grid has >3 fixed columns (job queue, asset rows).
+       8. Wrap wide grid rows in overflow-x:auto containers.
        9. Bump touch target sizes on small controls.
       10. Let the stations tooltip react to :active (touch-hold) too.
-     ============================================================ */
+     ───────────────────────────────────────────────────────────── */
   @media (max-width: 600px) {
 
     /* ---- 1. Hide characters bar on phone ---- */
@@ -3846,8 +3906,10 @@
              and just barely fits at 380px. Relax the wrapper width and let
              the inputs grid use auto-fill so tiles wrap on the narrowest
              phones instead of touching the edges. */
-    .factory-body { padding: 8px; }
+    .factory-body { padding: 8px; gap: 8px; flex-wrap: wrap; justify-content: center; }
     .factory-inputs { width: 100%; max-width: 100%; }
+    .factory-product { min-width: 0; }
+    .product-frame { width: 160px; height: 160px; }
     .inputs-grid {
       grid-template-columns: repeat(auto-fill, 52px) !important;
       justify-content: center;
