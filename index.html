@@ -3780,18 +3780,23 @@
     .quad-header-pricing .quad-header-meta { justify-self: start; }
     .pricing-controls { justify-self: start; flex-wrap: wrap; }
 
-    /* Q2 shopping list: 7-col grid has min-content width ~560px.
-       In a ~460px quadrant that overflows. Wrap the container in
-       horizontal scroll so users can swipe/scroll to see all cols
-       rather than having the row get cut off on the right. */
-    .q2-shopping {
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
+    /* Q2 shopping list: lower the min-width to the actual content
+       minimum (~460px), which lets most narrow-desktop and laptop
+       widths fit the 7 columns without any horizontal scrolling at
+       all. For the narrow tier 3 widths that still can't fit, the
+       .quad-body wrapper (Q2's scrollable container) already has
+       overflow:auto which sticks the scrollbar to the visible
+       bottom of the quadrant — no "scroll to bottom of list to
+       find scrollbar" problem. */
+    .q2-shopping     { overflow: visible; }
     .q2-shop-row,
-    .q2-shop-row-bp {
-      min-width: 560px;
-    }
+    .q2-shop-row-bp  { min-width: 460px; }
+    /* Put the horizontal scroll on .quad-body so its scrollbar sits
+       at the bottom of the VISIBLE quadrant (which is a bounded box)
+       rather than at the bottom of the content list (which might be
+       hundreds of pixels below the viewport). Scoped to quad-tr so
+       it only affects the right-column tabs. */
+    .quad-tr .quad-body { overflow-x: auto; }
 
     /* Q4 freight list: 5-col grid, same treatment as shopping rows. */
     .q4-freight-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -3859,10 +3864,16 @@
     .quad-header-pricing .quad-header-meta { justify-self: start; }
     .pricing-controls { justify-self: start; flex-wrap: wrap; }
 
-    /* Shopping rows + freight rows: horizontal scroll as in tier 2. */
-    .q2-shopping     { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* Shopping rows + freight rows. Shopping min-width dropped from
+       560 (over-estimated) to 460 (actual content min) so more
+       viewports fit without scrolling. Scrollbar lives on .quad-body
+       for Q2 so it sits at the bottom of the visible quadrant, not
+       at the bottom of the full content list (which was off-screen
+       until you scrolled down through all 50 rows). */
+    .q2-shopping     { overflow: visible; }
     .q2-shop-row,
-    .q2-shop-row-bp  { min-width: 560px; }
+    .q2-shop-row-bp  { min-width: 460px; }
+    .quad-tr .quad-body { overflow-x: auto; }
     .q4-freight-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .q4-freight-row  { min-width: 420px; }
 
@@ -3996,20 +4007,21 @@
 
     /* ---- 8. Wide grid rows: horizontal scroll inside their container ---- */
     /* Only the Q2 shopping list has rows wide enough to actually need it:
-         .q2-shop-row    = 7-col grid (32px 1fr 80px 60px 70px 70px 90px) ≈ 560px min
+         .q2-shop-row    = 7-col grid (32px 1fr 80px 60px 70px 70px 90px) ≈ 460px min
          .q2-shop-row-bp = 5-col grid (32px 1fr 80px 100px 160px)        ≈ 520px min
        The jobs queue (3-col), stations-option (3-col) and assets-item-row
        (4-col) all fit within 380px so they don't need wrapping — they'd
        just get horizontal scroll on content that already fits, which is
-       worse than leaving them alone. */
-    .q2-shopping {
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-    }
+       worse than leaving them alone.
+
+       Scrollbar lives on .quad-body (Q2 container) rather than on
+       .q2-shopping itself — this way the scrollbar sits at the bottom
+       of the visible quadrant, not at the bottom of the full list
+       which may be hundreds of px below the fold. */
+    .q2-shopping { overflow: visible; }
     .q2-shop-row,
-    .q2-shop-row-bp {
-      min-width: 560px;
-    }
+    .q2-shop-row-bp { min-width: 460px; }
+    .quad-tr .quad-body { overflow-x: auto; }
 
     /* Q4 freight rows (5-col grid: 28px 1fr auto auto auto) — wrap its
        list container so it scrolls rather than squishing. */
