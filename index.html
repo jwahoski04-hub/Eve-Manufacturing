@@ -12788,8 +12788,30 @@ function getAvailableStations() {
 
   const out = [];
   for (const id of ids) {
-    const loc = LOCATIONS[id];
-    if (!loc) continue; // skip unresolved IDs (shouldn't happen after sync)
+    let loc = LOCATIONS[id];
+    if (!loc) {
+      // If this is a manually-added station but we don't have its LOCATIONS
+      // entry (e.g., resolution hasn't completed yet, or was purged), DON'T
+      // silently drop it — synthesize a placeholder so the user can still
+      // pick it. The placeholder name will be upgraded on the next render
+      // after async resolution completes. For auto-discovered stations
+      // (assets/BPCs) we still skip on missing LOCATIONS — those should
+      // always resolve as part of sync.
+      if (state.manualStations.has(String(id))) {
+        loc = {
+          name: `Station ${id}`,
+          shortName: `Loc ${String(id).slice(-6)}`,
+          system: '—',
+          region: '—',
+          security: 0,
+          type: 'unresolved',
+          mfgMat: 1.00,
+          reactionMat: 1.00,
+        };
+      } else {
+        continue;
+      }
+    }
     if (!isStationEnabled(id)) continue; // exclude stations the user has disabled
     out.push({ id, loc });
   }
