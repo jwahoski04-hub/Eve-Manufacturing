@@ -2568,6 +2568,31 @@
   }
   .corp-asset-path:first-child { border-top: none; }
 
+  /* Personal/corp source split — appears in tooltips (Q1 input tiles) and
+     compact rows (Q4 shopping list) when a project includes corp assets
+     and corp is contributing inventory. P: prefix for personal (default
+     text color), C: prefix for corp (cool blue, same as CORP badge). */
+  .tooltip-source-split {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed rgba(60,76,92,0.5);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #8ba4b3;
+  }
+  .tooltip-source-split .src-personal { color: #c9d4db; }
+  .tooltip-source-split .src-corp { color: #7ab8c8; }
+  .tooltip-source-split .sep { color: #5b7280; }
+
+  .q2-shop-source-split {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: #6c8592;
+    letter-spacing: 0.04em;
+    margin-top: 1px;
+  }
+  .q2-shop-source-split .src-corp { color: #7ab8c8; }
+
   /* Single asset row in the corp section. Simpler than personal asset
      rows because corp data has fewer columns to display (no per-character
      attribution, no buy/build status — just type, name, qty). */
@@ -4543,8 +4568,10 @@ const ESI_CONFIG = {
   ].join(' '),
 
   // Corp asset scope — opt-in only via "Authorize Corp Access" button on
-  // the Characters tab. Requires Director, Accountant, or Junior_Accountant
-  // role in-game. ESI rejects authorization if the character lacks the role.
+  // the Characters tab. Requires the Director role in-game on the
+  // authorizing character. CCP's ESI specifically rejects Accountant and
+  // Junior_Accountant for the corporation assets endpoint, despite earlier
+  // documentation suggesting otherwise.
   // Added ON TOP of SCOPES (not replacing) when re-authorizing for corp.
   CORP_SCOPE: 'esi-assets.read_corporation_assets.v1',
 
@@ -5574,9 +5601,9 @@ const esiApi = (() => {
 
   // ---------- Corp fetchers ----------
   // These require the character to have authorized the corp scope
-  // (esi-assets.read_corporation_assets.v1) AND have one of: Director,
-  // Accountant, or Junior_Accountant role in-game. Without the role,
-  // ESI returns 403 even with valid scope.
+  // (esi-assets.read_corporation_assets.v1) AND have the Director role
+  // in-game. Without Director, ESI returns 403 with "Character does not
+  // have required role(s)" even if the scope is on the token.
 
   // GET /characters/{id}/ — basic public info including current corporation_id.
   // We use this to resolve which corp's assets to fetch. Public endpoint, no
@@ -5593,7 +5620,7 @@ const esiApi = (() => {
   }
 
   // GET /corporations/{id}/assets/ — paginated. Requires CORP_SCOPE on the token
-  // and Director/Accountant/Junior_Accountant role on the character in-game.
+  // AND the Director role on the character in-game.
   // Asset record shape mirrors character assets: { item_id, type_id, location_id,
   // location_flag, location_type, quantity, is_singleton }.
   async function fetchCorpAssets(character, corpID) {
@@ -6093,6 +6120,114 @@ const esiApi = (() => {
   //
   // We represent unlimited runs with a sentinel 999999 in the transformed
   // data; downstream code checks `isBPO` or uses `Number.isFinite` guards.
+  // Same shape as transformAssets but for CORP assets.
+  // Output entries are tagged with source:'corp' and use corpID/corpName
+  // instead of characterID/characterName. The build math doesn't care about
+  // source — it just sums quantities — but the display layer reads source
+  // to render the personal/corp breakdown.
+  //
+  // Important difference from transformAssets: we explicitly filter out
+  // blueprints by typeID via the bpTypeIDs set. ESI's corp assets endpoint
+  // returns blueprints AND BPCs mixed into the asset list (same as character
+  // assets). The transformBlueprints handler runs separately for blueprints
+  // — but for corp we don't run that since it's read-only. So we just drop
+  // blueprint typeIDs here to avoid double-counting them as raw materials.
+  function transformCorpAssets(corpData, relevantTypeIDs, bpTypeIDs) {
+    const { corpID, corpName, assets, assetNames } = corpData;
+
+    // Same flag rules as character assets — only count items in actual hangars.
+    const HANGAR_FLAGS = new Set([
+      'Hangar', 'HangarAll',
+      'CorpSAG1','CorpSAG2','CorpSAG3','CorpSAG4','CorpSAG5','CorpSAG6','CorpSAG7',
+      'Deliveries', 'AssetSafety',
+    ]);
+    const FITTED_FLAGS_PREFIX = ['HiSlot', 'MedSlot', 'LoSlot', 'RigSlot', 'SubSystemSlot'];
+    const SHIP_INTERNAL = new Set(['FighterBay', 'FighterTube0','FighterTube1','FighterTube2','FighterTube3','FighterTube4','DroneBay','SubSystemBay','ShipHangar']);
+    const isFittedFlag = (flag) => FITTED_FLAGS_PREFIX.some(p => flag.startsWith(p));
+
+    const byItemId = new Map();
+    for (const a of assets) byItemId.set(a.item_id, a);
+
+    const out = {};
+    for (const a of assets) {
+      // Skip fitted/ship-internal items
+      if (isFittedFlag(a.location_flag) || SHIP_INTERNAL.has(a.location_flag)) continue;
+      // Project scope filter
+      if (relevantTypeIDs && !relevantTypeIDs.has(a.type_id)) continue;
+      // Drop blueprints (BPOs/BPCs/reaction formulas) — they get filtered by
+      // type ID since corp assets don't go through the BP transform pipeline.
+      if (bpTypeIDs && bpTypeIDs.has(a.type_id)) continue;
+
+      // Determine immediate container
+      const immediateParent = byItemId.get(a.location_id);
+      let containerID = null, containerTypeID = null, containerName = null;
+      if (immediateParent) {
+        containerID = immediateParent.item_id;
+        containerTypeID = immediateParent.type_id;
+        containerName = assetNames && assetNames.get(immediateParent.item_id) || null;
+      }
+
+      // Walk to root structure
+      let cur = a;
+      let rootLocationFlag = a.location_flag;
+      let rootLocationID = a.location_id;
+      let steps = 0;
+      while (steps++ < 20) {
+        const parent = byItemId.get(cur.location_id);
+        if (!parent) break;
+        if (isFittedFlag(parent.location_flag) || SHIP_INTERNAL.has(parent.location_flag)) {
+          rootLocationFlag = null;
+          break;
+        }
+        cur = parent;
+        rootLocationFlag = parent.location_flag;
+        rootLocationID = parent.location_id;
+      }
+      if (rootLocationFlag === null) continue;
+      if (!HANGAR_FLAGS.has(rootLocationFlag)) continue;
+
+      const loc = resolveLocationEntry(rootLocationID);
+      if (!out[a.type_id]) out[a.type_id] = [];
+      out[a.type_id].push({
+        locationID: loc.id,
+        location: loc.entry.name,
+        qty: a.quantity,
+        system: loc.entry.system,
+        security: loc.entry.security,
+        // Corp-specific metadata in place of characterID/characterName
+        corpID,
+        corpName,
+        source: 'corp',
+        // Container metadata
+        containerID,
+        containerTypeID,
+        containerName,
+        itemId: a.item_id,
+        isSingleton: !!a.is_singleton,
+      });
+    }
+    return out;
+  }
+
+  // ESI returns every blueprint and BPC in BOTH /assets/ and /blueprints/ for
+  // characters. For corps the same is true on /corporations/{id}/assets/ — we
+  // get raw "blueprint" type entries we need to filter out of the material
+  // count. This helper builds a Set of typeIDs we should NOT treat as
+  // materials, by gathering up known BP/BPC type IDs from character data
+  // (which DOES go through transformBlueprints and resolves the typeID list).
+  function buildBlueprintTypeIDSet() {
+    const bpTypeIDs = new Set();
+    for (const c of esiAuth.getLinkedCharacters()) {
+      const raw = dataByChar[c.characterID];
+      if (raw && Array.isArray(raw.blueprints)) {
+        for (const bp of raw.blueprints) bpTypeIDs.add(bp.type_id);
+      }
+    }
+    return bpTypeIDs;
+  }
+
+
+
   function transformBlueprints(character, bpArray, assetsArray, relevantTypeIDs, assetNames) {
     // Build item_id index from ASSETS (not blueprints) so we can check if a BP's
     // location_id is actually a container that happens to exist in the assets list.
@@ -6272,6 +6407,23 @@ const esiApi = (() => {
   function setCharacterFilter(characterID) { characterFilter = characterID; }
   function getCharacterFilter() { return characterFilter; }
 
+  // Returns corp assets formatted as a typeID-keyed map (same shape as
+  // getData().assets). Used by refreshDataFromEsi when a project has
+  // useCorpAssets enabled, to merge corp inventory into the build math.
+  // Filters out blueprints by typeID via buildBlueprintTypeIDSet so corp
+  // BP/BPC entries don't get counted as raw materials.
+  function getCorpAssetsForProject(relevantTypeIDs) {
+    const out = {};
+    const bpTypeIDs = buildBlueprintTypeIDSet();
+    for (const corpData of Object.values(dataByCorp)) {
+      const transformed = transformCorpAssets(corpData, relevantTypeIDs, bpTypeIDs);
+      for (const [tid, entries] of Object.entries(transformed)) {
+        (out[tid] ||= []).push(...entries);
+      }
+    }
+    return out;
+  }
+
   // Corp data accessors
   // getCorpData(corpID) → { corpID, corpName, ticker, assets, assetNames, fetchedAt } | undefined
   // getAllCorpData()    → array of all known corp data records
@@ -6300,6 +6452,7 @@ const esiApi = (() => {
     getCorpStatus,
     getKnownCorpIDs,
     characterHasCorpScope,
+    getCorpAssetsForProject,
     // Internal — used by esiLocations for authenticated /universe/structures calls
     _ensureAccessTokenFor: ensureAccessToken,
     // Debug surface — raw ESI responses, exposed for browser-console inspection
@@ -7702,6 +7855,28 @@ function saveProjectActiveChars(project) {
   }
   // Hardcoded demos would need a separate mechanism; we don't have any
   // at the moment so skipping that path keeps things simple.
+}
+
+// Persist the project's useCorpAssets boolean. When true, corp inventory
+// (from the corp asset endpoint) is merged into the project's build math
+// alongside personal character assets. Default false — projects only count
+// corp stock when explicitly opted in.
+function saveProjectUseCorpAssets(project) {
+  if (!project) return;
+  if (project.__user) {
+    const userProjs = loadUserProjects();
+    const idx = userProjs.findIndex(p => p.id === project.id);
+    if (idx >= 0) {
+      userProjs[idx].useCorpAssets = !!project.useCorpAssets;
+      saveUserProjects(userProjs);
+    }
+  }
+}
+
+// Reader: does this project use corp assets in its build math?
+// Default false if the field is missing (older projects, hardcoded demos).
+function projectUsesCorpAssets(project) {
+  return !!(project && project.useCorpAssets);
 }
 
 // =====================================================================
@@ -9409,6 +9584,17 @@ function refreshDataFromEsi() {
   CHARACTER_ASSETS = data.assets;
   CHARACTER_BPCS   = data.blueprints;
   ACTIVE_JOBS      = data.jobs;
+
+  // If the active project opts in to corp assets, merge corp inventory into
+  // CHARACTER_ASSETS (same shape — typeID → array of asset entries). Corp
+  // entries are tagged with source:'corp' for display-layer differentiation.
+  // Build math just sums quantities so it doesn't care about source.
+  if (project && projectUsesCorpAssets(project)) {
+    const corpAssets = esiApi.getCorpAssetsForProject(scope);
+    for (const [tid, entries] of Object.entries(corpAssets)) {
+      (CHARACTER_ASSETS[tid] ||= []).push(...entries);
+    }
+  }
 }
 
 // Format a "synced X ago" string for tooltips. Null = never synced.
@@ -9712,12 +9898,17 @@ function renderMainApp() {
               </div>
               <div class="inputs-grid">
                 ${mats.map((m, i) => {
-                  const owned = m.assets.reduce((s, a) => s + a.qty, 0);
+                  const personalQty = m.assets.filter(a => a.source !== 'corp').reduce((s, a) => s + a.qty, 0);
+                  const corpQty     = m.assets.filter(a => a.source === 'corp').reduce((s, a) => s + a.qty, 0);
+                  const owned = personalQty + corpQty;
                   const has = owned >= m.needed;
                   const statusClass = has ? 'ready' : owned === 0 ? 'missing' : 'short';
                   const statusQClass = has ? 'has' : owned === 0 ? 'missing' : 'partial';
                   const barColor = has ? '#5a8f3a' : owned === 0 ? '#8a2828' : '#a87020';
                   const pct = Math.min(100, (owned / m.needed) * 100);
+                  // Only show source breakdown if there's actual corp inventory
+                  // contributing — keeps the tooltip clean for personal-only cases.
+                  const hasCorpContrib = corpQty > 0;
                   return `
                     <button class="input-tile ${statusClass} ${isTileSelected(i) ? 'selected' : ''}"
                       data-idx="${i}"
@@ -9734,6 +9925,13 @@ function renderMainApp() {
                           <span class="sep"> / </span>
                           <span class="req">${fmtFull(m.needed)}</span>
                         </div>
+                        ${hasCorpContrib ? `
+                          <div class="tooltip-source-split">
+                            <span class="src-personal">P: ${fmtFull(personalQty)}</span>
+                            <span class="sep"> + </span>
+                            <span class="src-corp">C: ${fmtFull(corpQty)}</span>
+                          </div>
+                        ` : ''}
                       </div>
                     </button>
                   `;
@@ -10346,6 +10544,33 @@ function assetsElsewhere(typeID, locationID) {
   return assets
     .filter(a => a.locationID !== locationID && isStationEnabled(a.locationID))
     .reduce((s, a) => s + a.qty, 0);
+}
+
+// Source-split helpers — return { personal, corp } breakdown for use in
+// display layer when the active project has corp assets enabled. Build math
+// uses the unsplit totals (assetsAt, assetsElsewhere) so calculations don't
+// change; these are display-only.
+function assetsAtBySource(typeID, locationID) {
+  const result = { personal: 0, corp: 0 };
+  if (!locationID || !isStationEnabled(locationID)) return result;
+  const assets = CHARACTER_ASSETS[typeID] || [];
+  for (const a of assets) {
+    if (a.locationID !== locationID) continue;
+    if (a.source === 'corp') result.corp += a.qty;
+    else result.personal += a.qty;
+  }
+  return result;
+}
+function assetsElsewhereBySource(typeID, locationID) {
+  const result = { personal: 0, corp: 0 };
+  const assets = CHARACTER_ASSETS[typeID] || [];
+  for (const a of assets) {
+    if (locationID && a.locationID === locationID) continue;
+    if (!isStationEnabled(a.locationID)) continue;
+    if (a.source === 'corp') result.corp += a.qty;
+    else result.personal += a.qty;
+  }
+  return result;
 }
 
 // Array of {locationID, qty} buckets EXCEPT the given location, largest first.
@@ -12360,6 +12585,14 @@ function renderShopSection(title, entries, count, withPrice, project) {
         const has = here >= e.qty;
         const statusCls = has ? 'ready' : here === 0 && owned === 0 ? 'missing' : here === 0 ? 'elsewhere' : 'short';
         const ownedCls = has ? 'have' : here === 0 ? 'missing' : 'partial';
+        // Source breakdown — personal vs corp at this location and elsewhere.
+        // Only shown when project has corp assets enabled AND corp actually
+        // contributes; otherwise the row stays unchanged.
+        const usingCorp = projectUsesCorpAssets(project);
+        const hereSrc = usingCorp ? assetsAtBySource(e.typeID, loc) : { personal: here, corp: 0 };
+        const elseSrc = usingCorp ? assetsElsewhereBySource(e.typeID, loc) : { personal: elsewhere, corp: 0 };
+        const showHereSplit = usingCorp && hereSrc.corp > 0;
+        const showElseSplit = usingCorp && elseSrc.corp > 0;
         // Destination chip color: amber for mfg inputs, pink for reaction inputs.
         // Composite and advanced reactions both collapse to "reactions" for color.
         const chipActivity = (e.consumingActivity === 'composite_reaction'
@@ -12388,10 +12621,12 @@ function renderShopSection(title, entries, count, withPrice, project) {
             <div class="q2-shop-col">
               <div class="q2-shop-label">HERE</div>
               <div class="q2-shop-val"><span class="${ownedCls}">${fmtFull(here)}</span></div>
+              ${showHereSplit ? `<div class="q2-shop-source-split">P:${fmtFull(hereSrc.personal)} + <span class="src-corp">C:${fmtFull(hereSrc.corp)}</span></div>` : ''}
             </div>
             <div class="q2-shop-col">
               <div class="q2-shop-label">AVAILABLE</div>
               <div class="q2-shop-val">${elsewhere > 0 ? `<span class="q2-shop-elsewhere">${fmtFull(elsewhere)}</span>` : '<span style="color:#5b7280;">—</span>'}</div>
+              ${showElseSplit ? `<div class="q2-shop-source-split">P:${fmtFull(elseSrc.personal)} + <span class="src-corp">C:${fmtFull(elseSrc.corp)}</span></div>` : ''}
             </div>
             <div class="q2-shop-col">
               <div class="q2-shop-label">NEED</div>
@@ -13378,9 +13613,17 @@ function corpLocationFlagLabel(flag) {
 
 function renderCorpHoldings() {
   const allCorps = esiApi.getAllCorpData();
+  const knownIDs = esiApi.getKnownCorpIDs();
   
-  // Empty state: no corp data fetched yet
-  if (allCorps.length === 0) {
+  // Surface error states — if a corp sync was attempted but failed (e.g., 403
+  // because the character lacks Director role despite having the scope), show
+  // the error instead of the generic empty state.
+  const erroredCorps = knownIDs
+    .map(id => ({ id, status: esiApi.getCorpStatus(id) }))
+    .filter(({ status }) => status && status.error);
+  
+  // Empty state: no corp data fetched yet AND no errors recorded
+  if (allCorps.length === 0 && erroredCorps.length === 0) {
     return `
       <div class="q2-section-label" style="margin-top: 16px;">
         <span>Corp Holdings</span>
@@ -13390,12 +13633,39 @@ function renderCorpHoldings() {
         <div class="assets-empty-icon">◇</div>
         <div class="assets-empty-title">No corp data linked</div>
         <div class="assets-empty-desc">
-          To see corporation assets, a Director / Accountant / Junior_Accountant must click
+          To see corporation assets, a character with the <strong>Director</strong> role must click
           <span class="hk">Authorize Corp Access</span> on the Characters tab. After authorization,
-          corp asset data is fetched on the next Sync All.
+          corp asset data is fetched on the next Sync All. (CCP's ESI requires Director role
+          specifically — Accountant and Junior_Accountant roles are NOT sufficient for the
+          corp assets endpoint.)
         </div>
       </div>
     `;
+  }
+
+  // Error state: auth went through but the fetch was rejected
+  let errorBlock = '';
+  if (erroredCorps.length > 0) {
+    errorBlock = erroredCorps.map(({ id, status }) => {
+      const isRoleError = /required role/i.test(status.error);
+      return `
+        <div class="assets-empty-state" style="padding: 20px 12px; border-left: 3px solid #c14848; text-align: left;">
+          <div class="assets-empty-title" style="color: #f0d8d8;">Corp ${id}: sync failed</div>
+          <div class="assets-empty-desc">
+            ${isRoleError ? `
+              <strong>The authorizing character does not have the Director role in-game.</strong>
+              CCP's ESI rejects this endpoint for any role lower than Director — Accountant
+              and Junior_Accountant are not accepted, despite some older documentation. To
+              continue, either (a) have a Director re-authorize via "Authorize Corp Access"
+              on the Characters tab, or (b) have your CEO grant Director role to the
+              authorizing character.
+            ` : `
+              ESI error: <code style="color: #d79e3c;">${escapeHtml(status.error)}</code>
+            `}
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   return `
@@ -13403,9 +13673,10 @@ function renderCorpHoldings() {
       <span>Corp Holdings</span>
       <div class="divider"></div>
       <span style="color: #7a8a95; font-family: 'IBM Plex Mono', monospace;">
-        ${allCorps.length} CORP${allCorps.length !== 1 ? 'S' : ''}
+        ${allCorps.length} CORP${allCorps.length !== 1 ? 'S' : ''}${erroredCorps.length > 0 ? ` · ${erroredCorps.length} ERROR${erroredCorps.length !== 1 ? 'S' : ''}` : ''}
       </span>
     </div>
+    ${errorBlock}
     ${allCorps.map(renderCorpCard).join('')}
   `;
 }
@@ -13649,7 +13920,8 @@ function renderCharactersTab(project) {
         <strong style="color: #c8a068;">Corporation assets (optional)</strong><br>
         For corporation leaders. Re-authorize a linked character with the
         corporation assets scope to view your corp's inventory in the Assets
-        tab. Requires Director, Accountant, or Junior Accountant role in-game.
+        tab. Requires the <strong>Director</strong> role in-game (CCP's ESI does
+        not accept Accountant or Junior_Accountant for this endpoint).
       </div>
       <button class="char-add-btn" id="esi-add-corp-btn" style="margin-top: 10px;">
         Authorize Corp Access
@@ -13716,6 +13988,29 @@ function renderCharactersTab(project) {
       for other projects.
       ${usingDefault ? '<br><span style="color:#8ba4b3;">No customizations — all linked characters contribute by default.</span>' : ''}
     </div>
+    ${esiApi.getAllCorpData().length > 0 ? `
+      <div class="chars-tab-corp-toggle" style="padding: 8px 16px 12px; border-bottom: 1px solid #1a2028;">
+        <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+          <input
+            type="checkbox"
+            id="chars-tab-corp-toggle"
+            ${projectUsesCorpAssets(project) ? 'checked' : ''}
+            style="margin-top: 3px; cursor: pointer;"
+          />
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 12px; color: #c9d4db;">Use corp assets in build math</span>
+              <span class="corp-badge">CORP</span>
+            </div>
+            <div style="font-size: 11px; color: #8ba4b3; margin-top: 2px;">
+              When enabled, corporation inventory contributes to "have" calculations
+              alongside personal assets. Q1 input tiles, Q4 shopping list, and
+              material breakdowns will show personal/corp split.
+            </div>
+          </div>
+        </label>
+      </div>
+    ` : ''}
     <div class="chars-tab-list">
       ${rows}
     </div>
@@ -14643,6 +14938,21 @@ function bindHandlers(project) {
         }
       }
       if (typeof PROJECT_TYPEID_CACHE !== 'undefined') PROJECT_TYPEID_CACHE.delete(project);
+      renderPreservingQuadScroll();
+    };
+  }
+
+  // Corp assets toggle: opt this project in/out of including corp inventory
+  // in build math. Mutates the project, saves, invalidates the project scope
+  // cache (corp data may add typeIDs the project hadn't seen), refreshes the
+  // ESI data view (which now includes/excludes corp), and re-renders.
+  const corpToggle = document.getElementById('chars-tab-corp-toggle');
+  if (corpToggle) {
+    corpToggle.onchange = () => {
+      project.useCorpAssets = corpToggle.checked;
+      saveProjectUseCorpAssets(project);
+      if (typeof PROJECT_TYPEID_CACHE !== 'undefined') PROJECT_TYPEID_CACHE.delete(project);
+      refreshDataFromEsi();
       renderPreservingQuadScroll();
     };
   }
