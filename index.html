@@ -2501,6 +2501,106 @@
     border-color: rgba(108,160,192,0.5);
     color: #a0d0e0;
   }
+
+  /* ============== ASSETS TAB: SCOPE FILTER BAR ==============
+     Three-button toggle (Personal / Corp / Both) at the top of the
+     Assets tab. Active button gets the amber treatment; inactive use
+     muted grays so the eye flows past them. */
+  .assets-scope-bar {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px 4px;
+    margin-bottom: 4px;
+  }
+  .assets-scope-btn {
+    flex: 1;
+    padding: 6px 12px;
+    background: rgba(10,14,20,0.6);
+    border: 1px solid #1a2430;
+    color: #6c8592;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .assets-scope-btn:hover {
+    background: rgba(20,30,40,0.7);
+    border-color: #2a3a4a;
+    color: #c9d4db;
+  }
+  .assets-scope-btn.active {
+    background: rgba(201,168,104,0.12);
+    border-color: rgba(201,168,104,0.5);
+    color: #e8c078;
+  }
+
+  /* ============== CORP ASSETS UI ==============
+     CORP badge inline next to corp name in the corp card header.
+     Matches the rig badge styling pattern (small, uppercase, mono). */
+  .corp-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-left: 8px;
+    background: rgba(108,160,192,0.15);
+    border: 1px solid rgba(108,160,192,0.4);
+    color: #7ab8c8;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+
+  /* Path label shown above grouped items inside a corp location card.
+     "Hangar 3 › Container Alpha › Secure Container B" — the chain
+     walker output. Italic, muted, breaks long paths into next line. */
+  .corp-asset-path {
+    padding: 6px 10px 4px;
+    margin-top: 2px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: #8ba4b3;
+    letter-spacing: 0.04em;
+    border-top: 1px dashed rgba(60,76,92,0.4);
+    word-break: break-word;
+  }
+  .corp-asset-path:first-child { border-top: none; }
+
+  /* Single asset row in the corp section. Simpler than personal asset
+     rows because corp data has fewer columns to display (no per-character
+     attribution, no buy/build status — just type, name, qty). */
+  .corp-asset-row {
+    display: grid;
+    grid-template-columns: 32px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px;
+    background: rgba(5,7,9,0.4);
+    border-bottom: 1px solid rgba(26,32,40,0.4);
+  }
+  .corp-asset-row:last-child { border-bottom: none; }
+  .corp-asset-row .asset-icon {
+    width: 32px; height: 32px;
+    background: #050709;
+    border: 1px solid #1a2430;
+  }
+  .corp-asset-row .asset-name {
+    font-size: 12px;
+    color: #c9d4db;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .corp-asset-row .asset-qty {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #c9b676;
+    text-align: right;
+    padding-right: 4px;
+  }
+
   /* Container sub-groups nested within a station card */
   .assets-container-group {
     margin: 4px 10px 6px;
@@ -4442,6 +4542,12 @@ const ESI_CONFIG = {
     'esi-characters.read_corporation_roles.v1',
   ].join(' '),
 
+  // Corp asset scope — opt-in only via "Authorize Corp Access" button on
+  // the Characters tab. Requires Director, Accountant, or Junior_Accountant
+  // role in-game. ESI rejects authorization if the character lacks the role.
+  // Added ON TOP of SCOPES (not replacing) when re-authorizing for corp.
+  CORP_SCOPE: 'esi-assets.read_corporation_assets.v1',
+
   AUTH_URL:  'https://login.eveonline.com/v2/oauth/authorize/',
   TOKEN_URL: 'https://login.eveonline.com/v2/oauth/token',
   JWKS_URL:  'https://login.eveonline.com/oauth/jwks',
@@ -4602,6 +4708,59 @@ const esiAuth = (() => {
     window.location.href = ESI_CONFIG.AUTH_URL + '?' + params.toString();
   }
 
+  // beginCorpAuth — opt-in corp asset scope authorization.
+  // Same OAuth/PKCE flow as beginLogin but requests SCOPES + CORP_SCOPE.
+  // After successful callback, the character's scopes string will include the
+  // corp scope, which lets us detect corp-authorized characters and call the
+  // corp asset endpoints with their tokens.
+  // 
+  // Note: this re-authorizes the character. EVE's SSO will treat it as a fresh
+  // login — if the character already exists in localStorage, handleCallback's
+  // upsert logic replaces the record (preserving characterID, refreshing scopes
+  // and refreshToken). The character will be linked to whatever EVE account
+  // signs in to the SSO redirect — usually the same one already linked, but
+  // not guaranteed; user must select correctly on the SSO page.
+  async function beginCorpAuth() {
+    const clientId = getClientId();
+    if (!clientId) {
+      alert('Client ID not set. Enter it in the welcome screen or paste into ESI_CONFIG.CLIENT_ID in the source.');
+      return;
+    }
+    const verifier = generatePkceVerifier();
+    const challenge = await generatePkceChallenge(verifier);
+    const stateVal = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
+
+    localStorage.removeItem(ESI_CONFIG.LS_PKCE_VERIFIER);
+    localStorage.removeItem(ESI_CONFIG.LS_PKCE_STATE);
+    localStorage.setItem(ESI_CONFIG.LS_PKCE_VERIFIER, verifier);
+    localStorage.setItem(ESI_CONFIG.LS_PKCE_STATE, stateVal);
+
+    const writtenState = localStorage.getItem(ESI_CONFIG.LS_PKCE_STATE);
+    if (writtenState !== stateVal) {
+      alert('Failed to persist login state to localStorage. Are you in Private Browsing mode? Try a normal browser window.');
+      return;
+    }
+
+    console.log('[ESI] beginCorpAuth: wrote state=', stateVal.substring(0, 8) + '…');
+
+    // Combined scope set: regular scopes PLUS the corp scope. EVE's SSO will
+    // present the user with a permissions list; if they refuse the corp scope
+    // (or lack the in-game role to grant it), the auth either fails or returns
+    // tokens without it — we detect that from the JWT after exchange.
+    const combinedScopes = ESI_CONFIG.SCOPES + ' ' + ESI_CONFIG.CORP_SCOPE;
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      redirect_uri: ESI_CONFIG.REDIRECT_URI,
+      client_id: clientId,
+      scope: combinedScopes,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: stateVal,
+    });
+    window.location.href = ESI_CONFIG.AUTH_URL + '?' + params.toString();
+  }
+
   // Called on every page load. If the URL contains ?code=..., we're returning from SSO.
   // Returns a promise that resolves to { success, characterID?, error? }.
   async function handleCallback() {
@@ -4736,6 +4895,7 @@ const esiAuth = (() => {
     getLinkedCharacters: loadCharacters,
     hasAnyLinked: () => loadCharacters().length > 0,
     beginLogin,
+    beginCorpAuth,
     handleCallback,
     removeCharacter,
     updateCharacterRefreshToken,
@@ -5302,9 +5462,19 @@ const esiApi = (() => {
   //   dataByChar[id] = { assets, blueprints, jobs }          — raw ESI responses
   //   statusByChar[id] = { syncing, syncedAt, error }        — UI state
   //   tokenCache[id] = { accessToken, expiresAt }            — access token w/ expiry (ms)
+  //
+  // Corp data is keyed by corpID (not character) since multiple characters may
+  // share a corp — we only fetch once per corp, picking any corp-scoped char
+  // as the auth source.
+  //   dataByCorp[corpID] = { corpID, corpName, assets, assetNames, fetchedAt }
+  //   corpStatusByID[corpID] = { syncing, syncedAt, error }
+  //   characterCorpID[characterID] = corpID                  — cache of corp lookup
   const dataByChar = {};
   const statusByChar = {};
   const tokenCache = {};
+  const dataByCorp = {};
+  const corpStatusByID = {};
+  const characterCorpID = {};
   let characterFilter = null; // null = aggregate all, string characterID = single
 
   // ---------- Access token management ----------
@@ -5400,6 +5570,81 @@ const esiApi = (() => {
   }
   async function fetchIndustryJobs(character) {
     return esiFetch(character, `/characters/${character.characterID}/industry/jobs/`, { paginate: false });
+  }
+
+  // ---------- Corp fetchers ----------
+  // These require the character to have authorized the corp scope
+  // (esi-assets.read_corporation_assets.v1) AND have one of: Director,
+  // Accountant, or Junior_Accountant role in-game. Without the role,
+  // ESI returns 403 even with valid scope.
+
+  // GET /characters/{id}/ — basic public info including current corporation_id.
+  // We use this to resolve which corp's assets to fetch. Public endpoint, no
+  // scope required, but we use esiFetch for the auth-rotation safety net.
+  async function fetchCharacterCorpInfo(character) {
+    const data = await esiFetch(character, `/characters/${character.characterID}/`);
+    return data && data.corporation_id ? data.corporation_id : null;
+  }
+
+  // GET /corporations/{id}/ — corp public info (name, ticker, etc.). Public, no scope.
+  // We fetch this once to know the corp's display name for the Assets tab badge.
+  async function fetchCorpInfo(character, corpID) {
+    return esiFetch(character, `/corporations/${corpID}/`);
+  }
+
+  // GET /corporations/{id}/assets/ — paginated. Requires CORP_SCOPE on the token
+  // and Director/Accountant/Junior_Accountant role on the character in-game.
+  // Asset record shape mirrors character assets: { item_id, type_id, location_id,
+  // location_flag, location_type, quantity, is_singleton }.
+  async function fetchCorpAssets(character, corpID) {
+    return esiFetch(character, `/corporations/${corpID}/assets/`, { paginate: true });
+  }
+
+  // POST /corporations/{id}/assets/names/ — resolves custom names on singleton
+  // corp items. Same protocol as character /assets/names/. Required to display
+  // friendly container/ship names in the location chain.
+  async function fetchCorpAssetNames(character, corpID, itemIds) {
+    const unique = Array.from(new Set(itemIds)).filter(id => id != null);
+    if (unique.length === 0) return new Map();
+
+    const chunks = [];
+    for (let i = 0; i < unique.length; i += 1000) {
+      chunks.push(unique.slice(i, i + 1000));
+    }
+
+    const result = new Map();
+    const token = await ensureAccessToken(character);
+    const baseHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+    await Promise.all(chunks.map(async chunk => {
+      try {
+        const r = await fetch(`${ESI_CONFIG.ESI_BASE}/corporations/${corpID}/assets/names/?datasource=tranquility`, {
+          method: 'POST',
+          headers: baseHeaders,
+          body: JSON.stringify(chunk),
+        });
+        if (!r.ok) {
+          console.warn(`[ESI] /corporations/${corpID}/assets/names/ failed (${r.status})`);
+          return;
+        }
+        const data = await r.json();
+        for (const entry of data) {
+          if (entry.name && entry.name !== 'None') {
+            result.set(entry.item_id, entry.name);
+          }
+        }
+      } catch (e) {
+        console.warn('[ESI] corp asset names fetch failed:', e.message);
+      }
+    }));
+    return result;
+  }
+
+  // Helper: does this character record include the corp scope?
+  // Reads from the character.scopes string (set at OAuth callback time from JWT).
+  function characterHasCorpScope(character) {
+    if (!character || !character.scopes) return false;
+    return character.scopes.split(/\s+/).includes(ESI_CONFIG.CORP_SCOPE);
   }
 
   // POST /characters/{id}/assets/names/ — resolves custom names set by the user on
@@ -5531,7 +5776,97 @@ const esiApi = (() => {
 
   async function syncAll() {
     const chars = esiAuth.getLinkedCharacters();
+    // Step 1: sync per-character data (assets, BPs, jobs) in parallel
     await Promise.all(chars.map(c => syncCharacter(c.characterID)));
+
+    // Step 2: corp data — for any character with the corp scope, fetch their
+    // corporation's assets. De-dupe by corpID so we only fetch once per corp
+    // even if multiple alts in the same corp are linked.
+    const corpScopedChars = chars.filter(c => characterHasCorpScope(c));
+    if (corpScopedChars.length === 0) return;
+
+    // Resolve each char's corpID first (parallel), then collapse to unique corp set
+    const corpResolvePromises = corpScopedChars.map(async c => {
+      try {
+        let corpID = characterCorpID[c.characterID];
+        if (!corpID) {
+          corpID = await fetchCharacterCorpInfo(c);
+          if (corpID) characterCorpID[c.characterID] = corpID;
+        }
+        return { character: c, corpID };
+      } catch (e) {
+        console.warn(`[ESI] corp resolution failed for ${c.characterName}:`, e.message);
+        return { character: c, corpID: null };
+      }
+    });
+    const resolved = await Promise.all(corpResolvePromises);
+
+    // Build corpID -> [characters] map; pick the first char as auth source per corp
+    const charsByCorpID = {};
+    for (const { character, corpID } of resolved) {
+      if (!corpID) continue;
+      if (!charsByCorpID[corpID]) charsByCorpID[corpID] = [];
+      charsByCorpID[corpID].push(character);
+    }
+
+    // Sync each unique corp in parallel
+    await Promise.all(Object.entries(charsByCorpID).map(([corpID, charList]) =>
+      syncCorpData(parseInt(corpID, 10), charList[0])
+    ));
+  }
+
+  // syncCorpData — fetches corp assets + corp info + asset names for one corp.
+  // Uses authChar's token (any corp-scoped character in this corp can authorize).
+  // Updates dataByCorp + corpStatusByID. Errors don't throw; they're recorded
+  // in corpStatusByID for UI display.
+  async function syncCorpData(corpID, authChar) {
+    corpStatusByID[corpID] = { ...corpStatusByID[corpID], syncing: true, error: null };
+    try {
+      // Parallel: fetch corp info (for name) + corp assets
+      const [corpInfo, assets] = await Promise.all([
+        fetchCorpInfo(authChar, corpID),
+        fetchCorpAssets(authChar, corpID),
+      ]);
+
+      // Resolve singleton names (corp containers/ships often have custom names)
+      const singletonItemIds = assets.filter(a => a.is_singleton).map(a => a.item_id);
+      const assetNameMap = await fetchCorpAssetNames(authChar, corpID, singletonItemIds);
+
+      // Resolve location IDs (top-level structures) using authChar's token —
+      // ESI's structure name endpoint requires character auth. Same pattern as
+      // character syncCharacter does.
+      const itemIds = new Set(assets.map(a => a.item_id));
+      const locationIds = new Set();
+      for (const a of assets) {
+        if (!itemIds.has(a.location_id)) locationIds.add(a.location_id);
+      }
+
+      // Resolve type names for all corp asset typeIDs (also catches container types)
+      const typeIdsToResolve = new Set();
+      for (const a of assets) typeIdsToResolve.add(a.type_id);
+
+      await Promise.all([
+        esiLocations.resolveMany(Array.from(locationIds), authChar),
+        esiTypes.resolveMany(Array.from(typeIdsToResolve)),
+      ]);
+
+      dataByCorp[corpID] = {
+        corpID,
+        corpName: corpInfo?.name || `Corp ${corpID}`,
+        ticker:   corpInfo?.ticker || '',
+        assets,
+        assetNames: assetNameMap,
+        fetchedAt: Date.now(),
+      };
+      corpStatusByID[corpID] = { syncing: false, syncedAt: Date.now(), error: null };
+    } catch (e) {
+      console.error(`[ESI] corp sync failed for corpID ${corpID}:`, e);
+      corpStatusByID[corpID] = {
+        syncing: false,
+        syncedAt: corpStatusByID[corpID]?.syncedAt,
+        error: e.message,
+      };
+    }
   }
 
   // ---------- Transforms: ESI shape → app shape ----------
@@ -5928,17 +6263,39 @@ const esiApi = (() => {
   function setCharacterFilter(characterID) { characterFilter = characterID; }
   function getCharacterFilter() { return characterFilter; }
 
+  // Corp data accessors
+  // getCorpData(corpID) → { corpID, corpName, ticker, assets, assetNames, fetchedAt } | undefined
+  // getAllCorpData()    → array of all known corp data records
+  // getCorpStatus(corpID) → { syncing, syncedAt, error } | undefined
+  // getKnownCorpIDs()   → array of corpIDs we have data or status for
+  function getCorpData(corpID) { return dataByCorp[corpID]; }
+  function getAllCorpData() { return Object.values(dataByCorp); }
+  function getCorpStatus(corpID) { return corpStatusByID[corpID]; }
+  function getKnownCorpIDs() {
+    const ids = new Set();
+    for (const k of Object.keys(dataByCorp)) ids.add(parseInt(k, 10));
+    for (const k of Object.keys(corpStatusByID)) ids.add(parseInt(k, 10));
+    return Array.from(ids);
+  }
+
   return {
     syncCharacter,
     syncAll,
+    syncCorpData,
     getData,
     getPerCharacterStatus,
     setCharacterFilter,
     getCharacterFilter,
+    getCorpData,
+    getAllCorpData,
+    getCorpStatus,
+    getKnownCorpIDs,
+    characterHasCorpScope,
     // Internal — used by esiLocations for authenticated /universe/structures calls
     _ensureAccessTokenFor: ensureAccessToken,
-    // Debug surface — raw ESI responses per character, exposed for browser-console inspection
+    // Debug surface — raw ESI responses, exposed for browser-console inspection
     _dataByChar: dataByChar,
+    _dataByCorp: dataByCorp,
   };
 })();
 
@@ -8228,6 +8585,14 @@ let state = {
   structure: 'sotiyo',
   assetsExpandedLocs: new Set(), // locationIDs whose Assets card is expanded; default empty = all collapsed
   assetsExpandedChars: new Set(), // characterIDs whose character-scope card is expanded
+  // Assets tab filter mode: 'personal' (default — only character-owned), 'corp'
+  // (only corporation-owned, requires corp scope authorization), or 'both'.
+  // Not persisted — this is a session-level UI choice, not a config.
+  assetsScope: 'personal',
+  // Per-corp expansion state for the Assets tab corp section. Mirrors
+  // assetsExpandedChars/Locs but for corporation cards.
+  assetsExpandedCorps: new Set(),
+  assetsExpandedCorpLocs: new Set(),
   // Disabled stations — assets and BPCs at these locations do NOT count toward
   // HERE/ELSEWHERE/total-owned math. User toggles via Assets card header checkbox.
   // Persisted to localStorage under 'eveIndustry.disabledStations'.
@@ -9105,6 +9470,19 @@ function renderCharactersBar() {
 function wireCharactersBar() {
   const addBtn = document.getElementById('esi-add-char-btn');
   if (addBtn) addBtn.onclick = () => esiAuth.beginLogin();
+
+  // New: corp authorization button (only present in renderCharactersTab,
+  // not in the bar itself, but we wire it here for convenience since it
+  // uses the same onclick pattern as add-char). The handler triggers a
+  // separate OAuth flow with the corp scope appended.
+  const addCorpBtn = document.getElementById('esi-add-corp-btn');
+  if (addCorpBtn) addCorpBtn.onclick = () => {
+    if (!esiAuth.hasAnyLinked()) {
+      alert('Link a character first via "+ Add Character", then come back here to authorize corp access.');
+      return;
+    }
+    esiAuth.beginCorpAuth();
+  };
 
   const syncBtn = document.getElementById('esi-sync-all-btn');
   if (syncBtn) syncBtn.onclick = async () => {
@@ -12745,30 +13123,38 @@ function renderAssetsTab(project) {
       <div class="divider"></div>
       <span style="color: #7a8a95; font-family: 'IBM Plex Mono', monospace;">${charIDs.length} CHAR${charIDs.length !== 1 ? 'S' : ''} · ${orderedLocs.length} LOC${orderedLocs.length !== 1 ? 'S' : ''} · ${fmtISK(grandTotal)}</span>
     </div>
-    <div class="assets-tab-summary">
-      <div class="assets-summary-cell">
-        <div class="assets-summary-label">Total value</div>
-        <div class="assets-summary-val">${fmtISK(grandTotal)}</div>
-      </div>
-      <div class="assets-summary-cell">
-        <div class="assets-summary-label">Item types</div>
-        <div class="assets-summary-val">${fmtFull(grandItemCount)}</div>
-      </div>
-      <div class="assets-summary-cell">
-        <div class="assets-summary-label">Blueprints</div>
-        <div class="assets-summary-val">${fmtFull(grandBpcCount)}</div>
-      </div>
+    <div class="assets-scope-bar">
+      <button class="assets-scope-btn ${state.assetsScope === 'personal' ? 'active' : ''}" data-assets-scope="personal">Personal</button>
+      <button class="assets-scope-btn ${state.assetsScope === 'corp' ? 'active' : ''}" data-assets-scope="corp">Corp</button>
+      <button class="assets-scope-btn ${state.assetsScope === 'both' ? 'active' : ''}" data-assets-scope="both">Both</button>
     </div>
-    <div class="assets-expand-bar">
-      <button class="assets-expand-btn" id="assets-expand-all">Expand all</button>
-      <button class="assets-expand-btn" id="assets-collapse-all">Collapse all</button>
-    </div>
-    ${charIDs.length === 0 ? `
-      <div class="assets-empty-state" style="padding: 40px 12px;">
-        <div class="assets-empty-title">No holdings to show</div>
-        <div class="assets-empty-desc">None of this project's active characters have relevant assets or blueprints. Check the Characters tab to confirm who's contributing, or re-sync from the top-right characters bar.</div>
+    ${(state.assetsScope === 'personal' || state.assetsScope === 'both') ? `
+      <div class="assets-tab-summary">
+        <div class="assets-summary-cell">
+          <div class="assets-summary-label">Total value</div>
+          <div class="assets-summary-val">${fmtISK(grandTotal)}</div>
+        </div>
+        <div class="assets-summary-cell">
+          <div class="assets-summary-label">Item types</div>
+          <div class="assets-summary-val">${fmtFull(grandItemCount)}</div>
+        </div>
+        <div class="assets-summary-cell">
+          <div class="assets-summary-label">Blueprints</div>
+          <div class="assets-summary-val">${fmtFull(grandBpcCount)}</div>
+        </div>
       </div>
-    ` : charIDs.map(charID => renderAssetsCharacterCard(charID, byChar[charID], mfgLoc, rxnLoc)).join('')}
+      <div class="assets-expand-bar">
+        <button class="assets-expand-btn" id="assets-expand-all">Expand all</button>
+        <button class="assets-expand-btn" id="assets-collapse-all">Collapse all</button>
+      </div>
+      ${charIDs.length === 0 ? `
+        <div class="assets-empty-state" style="padding: 40px 12px;">
+          <div class="assets-empty-title">No holdings to show</div>
+          <div class="assets-empty-desc">None of this project's active characters have relevant assets or blueprints. Check the Characters tab to confirm who's contributing, or re-sync from the top-right characters bar.</div>
+        </div>
+      ` : charIDs.map(charID => renderAssetsCharacterCard(charID, byChar[charID], mfgLoc, rxnLoc)).join('')}
+    ` : ''}
+    ${(state.assetsScope === 'corp' || state.assetsScope === 'both') ? renderCorpHoldings() : ''}
   `;
 }
 
@@ -12915,6 +13301,236 @@ function renderContainerSubGroup(locID, containerEntry) {
   `;
 }
 
+// =====================================================================
+// CORP HOLDINGS — read-only Assets tab section
+// =====================================================================
+// Walks the container chain for each corp asset to produce a "Container
+// Path" string (e.g., "Corp Hangar > Container Alpha"). Then groups by
+// root location and renders cards per corp -> per location.
+
+// walkContainerChain — given an asset and an asset-by-itemID lookup,
+// follow its location_id chain UP through containers/ships until reaching
+// a top-level structure (an ID not in the asset map). Returns:
+//   { rootLocationID, chain: [containerName, containerName, ...] }
+// where chain is in order from outermost-container to innermost.
+//
+// location_flag values from ESI tell us which "zone" within the parent:
+//   AssetSafety, CorpSAG1..7 (corp hangar divisions 1-7), Hangar, ShipHangar,
+//   etc. For corp top-level assets we expose the division as "Hangar 3" etc.
+function walkContainerChain(asset, assetByItemID, assetNames, typeNames) {
+  const chain = [];
+  let current = asset;
+  let safetyLimit = 20; // prevent infinite loops if data is malformed
+
+  while (safetyLimit-- > 0) {
+    const parent = assetByItemID[current.location_id];
+    if (!parent) {
+      // location_id is a top-level structure/station ID
+      return {
+        rootLocationID: current.location_id,
+        rootLocationFlag: current.location_flag,
+        chain,
+      };
+    }
+    // parent is itself an asset (a container or ship). Get its display name.
+    let parentName = assetNames.get(parent.item_id) || null;
+    if (!parentName) {
+      const tname = typeNames(parent.type_id);
+      parentName = tname || `Item ${parent.item_id}`;
+    }
+    chain.unshift(parentName);
+    current = parent;
+  }
+  // safety limit hit — return what we have
+  return { rootLocationID: current.location_id, rootLocationFlag: current.location_flag, chain };
+}
+
+// Translate an ESI location_flag value to a friendly division/hangar label.
+// Most flags map directly; corp-specific ones get a clean "Hangar N" label.
+function corpLocationFlagLabel(flag) {
+  if (!flag) return '';
+  if (flag.startsWith('CorpSAG')) {
+    // CorpSAG1 → "Hangar 1", CorpSAG2 → "Hangar 2", etc.
+    const n = flag.replace('CorpSAG', '');
+    return `Hangar ${n}`;
+  }
+  // Common flags get cleaner labels
+  const FRIENDLY = {
+    AssetSafety: 'Asset Safety',
+    Deliveries:  'Deliveries',
+    Hangar:      'Hangar',
+    ShipHangar:  'Ship Hangar',
+    FleetHangar: 'Fleet Hangar',
+    CorpDeliveries: 'Corp Deliveries',
+    OfficeFolder:'Office',
+  };
+  return FRIENDLY[flag] || flag;
+}
+
+function renderCorpHoldings() {
+  const allCorps = esiApi.getAllCorpData();
+  
+  // Empty state: no corp data fetched yet
+  if (allCorps.length === 0) {
+    return `
+      <div class="q2-section-label" style="margin-top: 16px;">
+        <span>Corp Holdings</span>
+        <div class="divider"></div>
+      </div>
+      <div class="assets-empty-state" style="padding: 32px 12px;">
+        <div class="assets-empty-icon">◇</div>
+        <div class="assets-empty-title">No corp data linked</div>
+        <div class="assets-empty-desc">
+          To see corporation assets, a Director / Accountant / Junior_Accountant must click
+          <span class="hk">Authorize Corp Access</span> on the Characters tab. After authorization,
+          corp asset data is fetched on the next Sync All.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="q2-section-label" style="margin-top: 16px;">
+      <span>Corp Holdings</span>
+      <div class="divider"></div>
+      <span style="color: #7a8a95; font-family: 'IBM Plex Mono', monospace;">
+        ${allCorps.length} CORP${allCorps.length !== 1 ? 'S' : ''}
+      </span>
+    </div>
+    ${allCorps.map(renderCorpCard).join('')}
+  `;
+}
+
+// Render one corp's holdings as a collapsible card with location sub-cards.
+function renderCorpCard(corpData) {
+  const { corpID, corpName, ticker, assets, assetNames, fetchedAt } = corpData;
+  const expanded = state.assetsExpandedCorps.has(String(corpID));
+
+  // Build asset lookup by item_id for chain walking
+  const assetByItemID = {};
+  for (const a of assets) assetByItemID[a.item_id] = a;
+  
+  const typeNameLookup = (typeID) => esiTypes.getName(typeID);
+
+  // Group assets by root location, walking container chains. Skip blueprints
+  // (typeID has 0x40000000 mask sometimes; just check by type, not perfect).
+  // For corp assets we don't filter by project scope — show everything.
+  const byLoc = {};
+  let totalItemCount = 0;
+  let totalContainerCount = 0;
+  const containersByLoc = {}; // locID → Set of container IDs
+
+  for (const a of assets) {
+    if (!a.quantity) continue;
+    // Skip the asset itself if it's a container (it'll be represented via
+    // the chain of items inside it, not as a count-1 item)
+    if (assetByItemID[a.item_id] && assets.some(other => other.location_id === a.item_id)) {
+      // It's a container — track it for the count, but don't list as an item
+      const chain = walkContainerChain(a, assetByItemID, assetNames, typeNameLookup);
+      const loc = chain.rootLocationID;
+      if (!containersByLoc[loc]) containersByLoc[loc] = new Set();
+      containersByLoc[loc].add(a.item_id);
+      continue;
+    }
+
+    const chain = walkContainerChain(a, assetByItemID, assetNames, typeNameLookup);
+    const locID = chain.rootLocationID;
+    if (!byLoc[locID]) byLoc[locID] = { items: [], itemCount: 0 };
+
+    // Build the human-readable path: division → containers
+    const division = corpLocationFlagLabel(chain.rootLocationFlag);
+    const pathParts = division ? [division, ...chain.chain] : chain.chain;
+    const pathLabel = pathParts.length > 0 ? pathParts.join(' › ') : '';
+
+    byLoc[locID].items.push({
+      typeID: a.type_id,
+      name: typeNameLookup(a.type_id) || `Type ${a.type_id}`,
+      qty: a.quantity,
+      pathLabel,
+      itemID: a.item_id,
+    });
+    byLoc[locID].itemCount++;
+    totalItemCount++;
+  }
+  for (const setOf of Object.values(containersByLoc)) totalContainerCount += setOf.size;
+
+  const locIDs = Object.keys(byLoc).sort((a, b) => byLoc[b].itemCount - byLoc[a].itemCount);
+
+  return `
+    <div class="assets-char-card ${expanded ? 'expanded' : 'collapsed'}">
+      <div class="assets-char-header" data-toggle-corp-card="${corpID}">
+        <div class="assets-char-chevron">${expanded ? '▼' : '▶'}</div>
+        <img class="assets-char-avatar" src="https://images.evetech.net/corporations/${corpID}/logo?size=32" alt="" onerror="this.style.opacity='0.3'">
+        <div class="assets-char-info">
+          <div class="assets-char-name">
+            ${escapeHtml(corpName)}
+            ${ticker ? `<span style="color: #8ba4b3; font-size: 11px; margin-left: 6px;">[${escapeHtml(ticker)}]</span>` : ''}
+            <span class="corp-badge">CORP</span>
+          </div>
+          <div class="assets-char-meta">
+            ${locIDs.length} LOC${locIDs.length !== 1 ? 'S' : ''} · ${fmtFull(totalItemCount)} ITEM${totalItemCount !== 1 ? 'S' : ''}${totalContainerCount > 0 ? ` · ${totalContainerCount} CONTAINER${totalContainerCount !== 1 ? 'S' : ''}` : ''}
+          </div>
+        </div>
+      </div>
+      ${expanded ? `
+        <div class="assets-char-body">
+          ${locIDs.length === 0 ? `
+            <div class="assets-empty-desc" style="padding: 16px;">No items found.</div>
+          ` : locIDs.map(locID => renderCorpLocationCard(corpID, locID, byLoc[locID])).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function renderCorpLocationCard(corpID, locID, locData) {
+  const loc = LOCATIONS[locID];
+  const expandKey = `${corpID}-${locID}`;
+  const expanded = state.assetsExpandedCorpLocs.has(expandKey);
+  const locName = loc ? loc.name : `Location ${locID}`;
+  const secCol = loc ? secColor(loc.security) : '#8ba4b3';
+
+  // Group items in this location by their pathLabel (so all "Hangar 1" items
+  // group together, "Hangar 1 › Container A" group together, etc.)
+  const byPath = {};
+  for (const item of locData.items) {
+    const key = item.pathLabel || '(root)';
+    if (!byPath[key]) byPath[key] = [];
+    byPath[key].push(item);
+  }
+
+  return `
+    <div class="assets-loc-card ${expanded ? 'expanded' : 'collapsed'}">
+      <div class="assets-loc-header" data-toggle-corp-loc="${expandKey}">
+        <div class="assets-loc-chevron">${expanded ? '▼' : '▶'}</div>
+        <div class="assets-loc-info">
+          <div class="assets-loc-name">${escapeHtml(locName)}</div>
+          <div class="assets-loc-meta">
+            <span style="color: ${secCol};">${loc ? loc.security.toFixed(1) : '?'}</span> ·
+            ${locData.itemCount} ITEM${locData.itemCount !== 1 ? 'S' : ''}
+          </div>
+        </div>
+      </div>
+      ${expanded ? `
+        <div class="assets-loc-body">
+          ${Object.entries(byPath).map(([path, items]) => `
+            ${path !== '(root)' ? `
+              <div class="corp-asset-path">${escapeHtml(path)}</div>
+            ` : ''}
+            ${items.map(item => `
+              <div class="corp-asset-row">
+                <img class="asset-icon" src="https://images.evetech.net/types/${item.typeID}/icon?size=32" alt="">
+                <div class="asset-name">${escapeHtml(item.name)}</div>
+                <div class="asset-qty">${fmtFull(item.qty)}</div>
+              </div>
+            `).join('')}
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderAssetsLocationCard(locID, bucket, mfgLoc, rxnLoc) {
   const loc = LOCATIONS[locID];
   if (!loc) return '';
@@ -13019,6 +13635,15 @@ function renderCharactersTab(project) {
       </div>
       <button class="char-add-btn" id="esi-add-char-btn" style="margin-top: 10px;">
         + Add Character (EVE SSO)
+      </button>
+      <div class="chars-tab-add-desc" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #1a2028;">
+        <strong style="color: #c8a068;">Corporation assets (optional)</strong><br>
+        For corporation leaders. Re-authorize a linked character with the
+        corporation assets scope to view your corp's inventory in the Assets
+        tab. Requires Director, Accountant, or Junior Accountant role in-game.
+      </div>
+      <button class="char-add-btn" id="esi-add-corp-btn" style="margin-top: 10px;">
+        Authorize Corp Access
       </button>
     </div>
   `;
@@ -13308,6 +13933,39 @@ function bindHandlers(project) {
       if (next.has(charID)) next.delete(charID); else next.add(charID);
       state.assetsExpandedChars = next;
       renderPreservingQuadScroll();
+    });
+  });
+
+  // Assets: per-corp card collapsible header
+  document.querySelectorAll('[data-toggle-corp-card]').forEach(el => {
+    el.addEventListener('click', () => {
+      const corpID = String(el.dataset.toggleCorpCard);
+      const next = new Set(state.assetsExpandedCorps);
+      if (next.has(corpID)) next.delete(corpID); else next.add(corpID);
+      state.assetsExpandedCorps = next;
+      renderPreservingQuadScroll();
+    });
+  });
+
+  // Assets: per-corp-location collapsible header
+  document.querySelectorAll('[data-toggle-corp-loc]').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = String(el.dataset.toggleCorpLoc);
+      const next = new Set(state.assetsExpandedCorpLocs);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      state.assetsExpandedCorpLocs = next;
+      renderPreservingQuadScroll();
+    });
+  });
+
+  // Assets: scope filter buttons (Personal / Corp / Both)
+  document.querySelectorAll('[data-assets-scope]').forEach(el => {
+    el.addEventListener('click', () => {
+      const scope = el.dataset.assetsScope;
+      if (scope === 'personal' || scope === 'corp' || scope === 'both') {
+        state.assetsScope = scope;
+        renderPreservingQuadScroll();
+      }
     });
   });
 
