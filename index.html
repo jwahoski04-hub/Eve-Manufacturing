@@ -4498,7 +4498,20 @@ const esiAuth = (() => {
     }
   }
   function saveCharacters(chars) {
-    localStorage.setItem(ESI_CONFIG.LS_CHARACTERS, JSON.stringify(chars));
+    try {
+      localStorage.setItem(ESI_CONFIG.LS_CHARACTERS, JSON.stringify(chars));
+    } catch (e) {
+      // localStorage.setItem can fail if quota exceeded or storage is disabled.
+      // Throw a descriptive error so callers (especially handleCallback) can catch
+      // and show it to the user instead of silently failing.
+      if (e.name === 'QuotaExceededError') {
+        throw new Error('Browser storage quota exceeded. Clear some data or try a different browser.');
+      } else if (e.name === 'SecurityError') {
+        throw new Error('Storage is disabled (private browsing or security settings). Try a normal browsing window.');
+      } else {
+        throw new Error(`Failed to save characters: ${e.message}`);
+      }
+    }
   }
 
   // Client ID resolution priority:
@@ -4665,7 +4678,14 @@ const esiAuth = (() => {
     const existingIdx = chars.findIndex(c => c.characterID === record.characterID);
     if (existingIdx >= 0) chars[existingIdx] = record;
     else chars.push(record);
-    saveCharacters(chars);
+    
+    try {
+      saveCharacters(chars);
+    } catch (e) {
+      // saveCharacters throws if localStorage fails. Return the error to the user
+      // instead of silently failing (which is what was happening before).
+      return { success: false, handled: true, error: e.message };
+    }
 
     return { success: true, handled: true, characterID: record.characterID, characterName: record.characterName };
   }
@@ -7288,7 +7308,7 @@ function saveUserProjects(userProjs) {
   try {
     localStorage.setItem(USER_PROJECTS_KEY, JSON.stringify(userProjs));
   } catch (e) {
-    console.warn('[projects] persist failed:', e.message);
+    notifyStorageError('userProjects', e);
   }
 }
 
@@ -8327,47 +8347,130 @@ let state = {
   },
 };
 
+// ============================================================
+// SAVE ERROR NOTIFICATION SYSTEM
+// ============================================================
+// All localStorage save operations route their errors through
+// notifyStorageError. This replaces silent `catch (e) {}` blocks
+// that hid quota-exceeded errors and made saves appear to succeed
+// when they actually failed (e.g. corpmate's rig configs reverting
+// after browser close, or 5th character add silently failing).
+//
+// Behavior:
+//  - Logs full error details to console for debugging
+//  - Shows a user-facing toast notification
+//  - De-dupes to once per 10 seconds (prevents spam from rapid
+//    save attempts hitting the same quota wall)
+//  - Toast auto-dismisses after 8 seconds; user can click X to close
+let __lastStorageErrorAt = 0;
+function notifyStorageError(operation, err) {
+  // Always log to console (devtools)
+  console.error(`[STORAGE] save failed for ${operation}:`, err.name, err.message);
+  
+  // Throttle user-facing notifications (10 sec cooldown)
+  const now = Date.now();
+  if (now - __lastStorageErrorAt < 10000) return;
+  __lastStorageErrorAt = now;
+  
+  // Build user-friendly message
+  let message;
+  if (err.name === 'QuotaExceededError' || /quota/i.test(err.message)) {
+    message = 'Browser storage is full. Your changes are NOT being saved. Try clearing site data in browser settings, or contact support.';
+  } else if (err.name === 'SecurityError') {
+    message = 'Storage is disabled (private browsing or security settings). Your changes are NOT being saved.';
+  } else {
+    message = `Save failed: ${err.message}. Your changes may not persist.`;
+  }
+  
+  // Create or reuse toast container
+  let toast = document.getElementById('storage-error-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'storage-error-toast';
+    toast.style.cssText = `
+      position: fixed;
+      top: 60px;
+      right: 16px;
+      max-width: 360px;
+      background: #2a0808;
+      border: 1px solid #c14848;
+      border-left: 4px solid #c14848;
+      color: #f0d8d8;
+      padding: 12px 36px 12px 14px;
+      font: 12px/1.4 'IBM Plex Sans', system-ui, sans-serif;
+      z-index: 999999;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      cursor: default;
+    `;
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
+      position: absolute; top: 4px; right: 6px;
+      background: none; border: none; color: #c14848;
+      font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 8px;
+    `;
+    closeBtn.onclick = () => toast.remove();
+    toast.appendChild(closeBtn);
+    const body = document.createElement('div');
+    body.id = 'storage-error-toast-body';
+    toast.appendChild(body);
+    document.body.appendChild(toast);
+  }
+  document.getElementById('storage-error-toast-body').textContent = message;
+  
+  // Auto-dismiss after 8 seconds
+  clearTimeout(toast.__dismissTimer);
+  toast.__dismissTimer = setTimeout(() => {
+    if (toast.parentNode) toast.remove();
+  }, 8000);
+}
+
 // Persist disabledStations to localStorage whenever it changes
 function saveDisabledStations() {
   try {
     localStorage.setItem('eveIndustry.disabledStations', JSON.stringify(Array.from(state.disabledStations)));
-  } catch (e) {}
+  } catch (e) { notifyStorageError('disabledStations', e); }
 }
 function saveProjectStations() {
   try {
     localStorage.setItem('eveIndustry.projectStations', JSON.stringify(state.projectStations));
-  } catch (e) {}
+  } catch (e) { notifyStorageError('projectStations', e); }
 }
 function saveManualStations() {
   try {
     localStorage.setItem('eveIndustry.manualStations', JSON.stringify(Array.from(state.manualStations)));
-  } catch (e) {}
+  } catch (e) { notifyStorageError('manualStations', e); }
 }
 // Persist per-project card drawer state to localStorage.
 function saveProjectCardExpanded() {
   try {
     localStorage.setItem('eveIndustry.projectCardExpanded', JSON.stringify(state.projectCardExpanded));
-  } catch (e) {}
+  } catch (e) { notifyStorageError('projectCardExpanded', e); }
 }
 // Persist projects-sidebar collapsed state. Stored as '1'/'0' string
 // (not JSON) to avoid any parse mismatch; boolean is sufficient here.
 function saveSidebarCollapsed() {
   try {
     localStorage.setItem('eveIndustry.sidebarCollapsed', state.sidebarCollapsed ? '1' : '0');
-  } catch (e) {}
+  } catch (e) { notifyStorageError('sidebarCollapsed', e); }
 }
 // Persist stationConfigs to localStorage. stationConfigs is a plain object
 // (keyed by stationID), so we stringify directly — no Array.from() needed
 // like with the Set-based savers above.
+//
+// IMPORTANT: this is the function that persists rig fits. If it fails
+// silently, users see configs revert after browser close (the in-session
+// state mutation works, but never persists to disk). All errors now
+// surface via notifyStorageError.
 function saveStationConfigs() {
   try {
     localStorage.setItem('eveIndustry.stationConfigs', JSON.stringify(state.stationConfigs));
-  } catch (e) {}
+  } catch (e) { notifyStorageError('stationConfigs', e); }
 }
 function saveBuyInsteadOfBuild() {
   try {
     localStorage.setItem('eveIndustry.buyInsteadOfBuild', JSON.stringify(Array.from(state.buyInsteadOfBuild)));
-  } catch (e) {}
+  } catch (e) { notifyStorageError('buyInsteadOfBuild', e); }
 }
 
 // Toggle whether a given product typeID should be BOUGHT (treated as raw
