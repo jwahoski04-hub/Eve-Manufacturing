@@ -5641,10 +5641,19 @@ const esiApi = (() => {
   }
 
   // Helper: does this character record include the corp scope?
-  // Reads from the character.scopes string (set at OAuth callback time from JWT).
+  // Handles both formats: scopes can be an array (new ESI behavior — JWT
+  // decoder stores .scp claim as-is, which is an array) OR a space-separated
+  // string (older/alternate flows). Defensive against both so it doesn't
+  // crash on .split() of an array.
   function characterHasCorpScope(character) {
     if (!character || !character.scopes) return false;
-    return character.scopes.split(/\s+/).includes(ESI_CONFIG.CORP_SCOPE);
+    if (Array.isArray(character.scopes)) {
+      return character.scopes.includes(ESI_CONFIG.CORP_SCOPE);
+    }
+    if (typeof character.scopes === 'string') {
+      return character.scopes.split(/[\s,]+/).includes(ESI_CONFIG.CORP_SCOPE);
+    }
+    return false;
   }
 
   // POST /characters/{id}/assets/names/ — resolves custom names set by the user on
